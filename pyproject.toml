@@ -15,3 +15,39 @@ dependencies = [
 
 [project.scripts]
 mo = "moliu.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["moliu*"]
+exclude = ["tests*", "data*", "output*", "设计文档*"]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.22",
+    "pytest-mock>=3.12",
+    "respx>=0.20",
+    "ruff>=0.1",
+    "mypy>=1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+pythonpath = ["."]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py311"
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line too long
+    "F401",  # unused import
+]
+line-length = 120
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+show_error_codes = true
+ignore_missing_imports = true

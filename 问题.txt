@@ -1,0 +1,130 @@
+我把项目完整走了一遍。下面是现存所有缺陷、下一步推进路径、完整实现清单。                                                                                                                               
+                                                                                                                                                                                                         
+  A. 现存缺陷（按严重度排序，共 17 项）                                                                                                                                                                  
+  🔴 P0：阻塞迭代的关键问题                                                                                                                                                                              
+  A1. 测试不可离线跑                                                                                                                                                                                     
+  moliu/tests/test_phase1.py 是 450 行脚本，每次跑要打 6+ 次真实 API，烧钱、慢、CI 不可用                                                                                                                
+  全是顶层代码 + print/check 模式，没用 pytest 框架、没 fixture、没 mock                                                                                                                                 
+  无 API key 环境 = 测试 6 起全崩，前 5 个用例的"PASS 全通过"是假象                                                                                                                                      
+  pyproject.toml 没有 pytest/pytest-asyncio 依赖，没有 [tool.pytest.ini_options]，没有 conftest.py                                                                                                       
+  A2. 无"前文摘要自动回灌"机制                                                                                                                                                                           
+  mo write N "beat" 必须人手贴 --recent，写到第 20 章人不知道怎么写 recent 才能让 AI 记得前情                                                                                                            
+  Generator.generate_chapter 的 recent_chapters="" 默认空——叙事连贯性靠人肉                                                                                                                              
+  这是设计文档里 RAG/记忆层要解决的问题，但 Phase 1 还没动手                                                                                                                                             
+  A3. 章节无版本管理                                                                                                                                                                                     
+  Generator.save_chapter 写到 第N章/正文.md，再跑 mo write N 会直接覆盖人手改过的章节                                                                                                                    
+  没有备份、没有 diff、没有"是否覆盖"询问                                                                                                                                                                
+  🟡 P1：影响质量的工程问题                                                                                                                                                                              
+  A4. 叙述者无 schema                                                                                                                                                                                    
+  narrator.md 是自由 markdown 文本，被原样拼进 system prompt                                                                                                                                             
+  设计文档 02-角色系统.md 明确要求"叙述者人设卡"，但代码只有 CharacterCard，没有 NarratorCard                                                                                                            
+  AI 写的"## 日常语气 / ## 高潮语气 / ## 禁用套话"塞进 prompt 后结构散乱                                                                                                                                 
+  A5. 套话禁用是死枚举                                                                                                                                                                                   
+  chapter_generate.system.j2:13 写死"心中涌起暖流、眼中闪过一丝..."6 个套话                                                                                                                              
+  AI 换个同义词就绕过——这条质量封顶                                                                                                                                                                      
+  应改为从 NarratorCard.banned_phrases 动态注入                                                                                                                                                          
+  A6. CLI 单文件 685 行已偏大                                                                                                                                                                            
+  cli.py 包含 4 个命令 + 4 个 _step_* 长函数 + _QuickstartRollback + 工具函数                                                                                                                            
+  每个 _step_* 都有几十行内联 prompt，prompt 与代码耦合，改 prompt 要改代码                                                                                                                              
+  调试时常来回报错位置不清                                                                                                                                                                               
+  A7. Prompt 散落在代码里                                                                                                                                                                                
+  _step_direction 里塞 30+ 行 system_prompt 字符串                                                                                                                                                       
+  _step_world / _step_characters / _step_narrator 同样                                                                                                                                                   
+  全项目只有 1 个 j2 模板被 Generator 用，quickstart 四步的全是字符串                                                                                                                                    
+  改 prompt 无法用 jinja 语法、无法 StrictUndefined 校验变量                                                                                                                                             
+  A8. 角色动态状态从不更新                                                                                                                                                                               
+  CharacterState 设计上是"每章更新"，但代码里从未更新过                                                                                                                                                  
+  Generator 生成完章节后 ChapterResult 只存 content/tokens，不更新角色状态                                                                                                                               
+  角色 state.current_goal 从第 1 章到第 100 章永远是同一句                                                                                                                                               
+  A9. 无失败模式设计                                                                                                                                                                                     
+  API 连续 3 次失败后 tenacity 抛 reraise=True，CLI 直接崩溃栈                                                                                                                                           
+  quickstart 中途断网没有续传，必须从头 redo                                                                                                                                                             
+  没有"保存用户的中间选择"机制                                                                                                                                                                           
+  设计文档 12-剩余问题.md 问题七明确提到，但未落地                                                                                                                                                       
+  🟢 P2：健壮性细节                                                                                                                                                                                      
+  A10. temperature 透传语义脆弱                                                                                                                                                                          
+  Generator.generate_chapter(temperature=None) → 透传 → gateway 用默认 0.8                                                                                                                               
+  Generator.generate_chapter(temperature=0) → 透传 → gateway 用 0.0                                                                                                                                      
+  None 与 0 行为不同，靠隐式约定，无单测守护，重构易踩坑                                                                                                                                                 
+  A11. retry 不区分网络异常                                                                                                                                                                              
+  _RetryIfServerError 只重试 5xx/429/TimeoutException                                                                                                                                                    
+  但 httpx.ConnectError / httpx.ReadError 不在重试列表 → 偶发网络抖动直接挂                                                                                                                              
+  A12. 无 token 预算与统计                                                                                                                                                                               
+  单章 token 用完就丢，无累计、无月度预算警告                                                                                                                                                            
+  mo write 1 用了 5000 token，下章 6000，没统计                                                                                                                                                          
+  跑长篇连载时成本不可控                                                                                                                                                                                 
+  A13. count_words 对 CJK 扩展 B/G/H 不覆盖                                                                                                                                                              
+  当前正则 [一-鿿㐀-䶿] 只到 U+9FFF 和 U+4DBF                                                                                                                                                            
+  含生僻字（如𠀀、𠀋）的文本字数偏低——爽文场景偶尔出现奇幻/古风生僻字                                                                                                                                                                                                                                                                                                                                           
+  不是大问题但单测里没 cover                                                                                                                                                                             
+  A14. _step_world 的"edit"循环出口                                                                                                                                                                      
+  校验失败后给用户 [redo] / [edit] 选项，但 edit 提交后不再次校验就回到上层 while True                                                                                                                   
+  实际能保证最终落盘文件是合法的（因为外层还有校验），但用户被绕晕                                                                                                                                       
+  代码逻辑可以收敛                                                                                                                                                                                       
+  A15. prompt_dir 路径仍不一致                                                                                                                                                                           
+  data_dir / output_dir 用裸 data / output/chapters，相对于 project_dir                                                                                                                                  
+  prompt_dir 用 moliu/prompts/templates，也是相对于 project_dir——OK                                                                                                                                      
+  但 pip install 后包跑到 site-packages，project_dir = Path(__file__).parent.parent 在编辑期是项目根，安装后是                                                                                           
+  ──── (156 lines hidden) ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+  ：从断点继续                                                                                                                                                                                           
+   mo quickstart --fresh：清空 state 重开                                                                                                                                                                
+  write 失败恢复                                                                                                                                                                                         
+   Generator.generate_chapter 失败时暂存 data/.last_failed_chapter.json（含 prompt、章节号、错误）                                                                                                       
+   mo retry 子命令重跑                                                                                                                                                                                   
+  网络中断                                                                                                                                                                                               
+   gateway 重试耗尽后抛 DeepSeekUnrecoverableError，CLI 给出"已暂存、用 mo retry 继续"提示                                                                                                               
+   不再崩栈                                                                                                                                                                                              
+  C10. 分段生成 (M4)                                                                                                                                                                                     
+  多步调用                                                                                                                                                                                               
+   Generator.generate_chapter 拆为：                                                                                                                                                                     
+  _generate_opening（开头 600 字，承接上章情绪）                                                                                                                                                         
+  _generate_middle（主体 1800 字，按 beat 推进）                                                                                                                                                         
+  _generate_ending（结尾 400 字，定情绪）                                                                                                                                                                
+  _generate_summary（200 字摘要 + 情绪标注）                                                                                                                                                             
+   每段独立 LLM 调用，独立 retry，独立 token 统计                                                                                                                                                        
+   全部成功才拼接 ChapterResult.content，任一段失败立即 mo retry-segment                                                                                                                                 
+  模板                                                                                                                                                                                                   
+   chapter_generate.opening.j2                                                                                                                                                                           
+   chapter_generate.middle.j2                                                                                                                                                                            
+   chapter_generate.ending.j2                                                                                                                                                                            
+  单测                                                                                                                                                                                                   
+   4 个 generate_* 函数各一组 mock 测试                                                                                                                                                                  
+  C11. 工程化收尾                                                                                                                                                                                        
+   git init，项目根 .git/ 启用，验证 .gitignore 生效（.env、data/、output/ 不进库）                                                                                                                      
+   新写 README.md：5 分钟入门 + 命令一览 + 配置说明 + 测试运行                                                                                                                                           
+   AGENTS.md 留开发约定（lint / typecheck 命令），便于 AI 协作                                                                                                                                           
+   requirements.txt 与 pyproject.toml 同步，或删 requirements.txt 只保留 pyproject.toml + uv lock                                                                                                        
+   加 ruff 配置（pyproject.toml [tool.ruff]），跑 ruff check moliu/                                                                                                                                      
+   加 mypy 或至少 pyright 检查；Optional 等遗留清扫                                                                                                                                                      
+   from __future__ import annotations 是否必要——3.11+ 不必要，可删（但保留也无所谓）                                                                                                                     
+  C12. 小问题批清                                                                                                                                                                                        
+   gateway.py:11 retry_if_exception_type 导入未用                                                                                                                                                        
+   config.py:27 prompt_dir 相对项目根，但 pip install 后会找不到——M4 再修                                                                                                                                
+   cli.py:670 from moliu.data.schemas import CharacterCard as _CC 函数内 import 已经清掉，但留了 as _yaml 全局别名——OK，统一即可                                                                         
+   chapter_generate.user.j2:9 {% if recent_chapters %} 与 StrictUndefined 冲突可能性——generator 传了空串，运行期 OK，建议改成 {% if recent_chapters is defined and recent_chapters %} 或参数默认改为 ""  
+  显式                                                                                                                                                                                                   
+   count_words 加一段 re.sub(r"\d+", "", text) 决定数字如何计数（当前完全不数数字，"2024 年" 算 2 字符还是 0）                                                                                           
+  C13. 设计文档回填（M5+）                                                                                                                                                                               
+   实现一两步设计文档后回填 设计文档/12-剩余问题.md，标记哪些已被代码解决                                                                                                                                
+   决定 RAG/一致性检查/章节类型路由 是否进 Phase 1.5                                                                                                                                                     
+   若不做，写明降级方案                                                                                                                                                                                  
+  D. 推荐立刻执行顺序                                                                                                                                                                                    
+  按 1→10 难度递增 + 价值递增：                                                                                                                                                                          
+                                                                                                                                                                                                         
+  #    任务    时间    价值                                                                                                                                                                              
+  1    pyproject.toml + pytest 设置    30 min    ⭐⭐⭐⭐⭐ 解锁所有后续迭代                                                                                                                             
+  2    count_words 纯单测    30 min    ⭐⭐⭐ 立刻有产出                                                                                                                                                 
+  3    删 test_phase1.py 中依赖 API 的部分，标记 integration    30 min    ⭐⭐⭐⭐                                                                                                                       
+  4    gateway mock 单测（含 retry 4 类异常）    1 h    ⭐⭐⭐⭐ 解锁 gateway 重构                                                                                                                       
+  5    NarratorCard schema + 模板动态注入    2 h    ⭐⭐⭐⭐ 质量立竿见影                                                                                                                                
+  6    前文 meta.json + 自动 recent    3 h    ⭐⭐⭐⭐⭐ 用户最痛点                                                                                                                                      
+  7    角色状态自动更新 + 备份    4 h    ⭐⭐⭐ 长期收益                                                                                                                                                 
+  8    CLI 拆分 + prompt 模板化    4 h    ⭐⭐⭐ 维护性                                                                                                                                                  
+  9    章节多版本管理    3 h    ⭐⭐⭐ 防丢稿                                                                                                                                                            
+  10    分段生成（opening/middle/ending）    8 h    ⭐⭐⭐⭐ 质量质变                                                                                                                                    
+  11    失败模式 + quickstart 续传    3 h    ⭐⭐ 体验                                                                                                                                                   
+  12    token 预算 + usage 命令    2 h    ⭐⭐ 成本控制                                                                                                                                                  
+  13    README + git init + ruff/mypy    1 h    ⭐⭐⭐⭐ 项目化                                                                                                                                          
+  一句话总结                                                                                                                                                                                             
+  先做 1–4（半天搞定测试 + gateway mock），这能让你后面 5–13 所有改动都有 false-positive 保护；然后做 5–6（叙述者 schema + 前文回灌），这是用户痛点和质量痛点；7–13 是工程化加长版。 13                  
+  项全做完，分数能从现在的 6.3 跳到 8.5+。   

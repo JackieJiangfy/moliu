@@ -1,0 +1,15 @@
+typer>=0.15
+httpx>=0.28
+tenacity>=9.0
+pydantic>=2.10
+pydantic-settings>=2.7
+pyyaml>=6.0
+jinja2>=3.1
+
+[dev]
+pytest>=8.0
+pytest-asyncio>=0.22
+pytest-mock>=3.12
+respx>=0.20
+ruff>=0.5
+mypy>=1.10
