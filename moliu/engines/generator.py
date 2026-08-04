@@ -77,18 +77,22 @@ class Generator:
         return ""
 
     def _extract_summary_from_text(self, content: str, chapter_num: int) -> str:
-        """从正文中简单提取摘要（备用方案）"""
-        # 提取前几个和后几个句子
-        sentences = content.replace("\n", "。").split("。")
+        """从正文中提取摘要（备用方案）"""
+        import re
+        
+        # 使用正则表达式按多种句末符号切分
+        # 支持：句号。、感叹号！、问号？、省略号…、换行符
+        sentences = re.split(r"[。！？…]+", content)
         sentences = [s.strip() for s in sentences if s.strip()]
 
         if len(sentences) >= 2:
             first_part = "。".join(sentences[:2])
             last_part = "。".join(sentences[-2:]) if len(sentences) >= 4 else sentences[-1]
-            return f"第{chapter_num}章【摘要】{first_part}...{last_part}"
+            return f"第{chapter_num}章【摘要】{first_part}。{last_part}"
         elif content:
-            # 取前100字
-            return f"第{chapter_num}章【摘要】{content[:100]}..."
+            # 取前100字（去除多余空白）
+            clean_content = re.sub(r"\s+", " ", content.strip())
+            return f"第{chapter_num}章【摘要】{clean_content[:100]}..."
         return ""
 
     async def generate_chapter(
@@ -299,7 +303,7 @@ class Generator:
 
         return root_content_path
 
-    def _update_version_history(self, chapter_num: int, version: int, emotion: str, summary: str) -> None:
+    def _update_version_history(self, chapter_num: int, version: int, emotion: str, summary: str, action: str = "create") -> None:
         """
         更新版本历史记录
 
@@ -308,6 +312,7 @@ class Generator:
             version: 版本号
             emotion: 情绪标签
             summary: 摘要
+            action: 动作类型 (create/restore)
         """
         import datetime
 
@@ -324,13 +329,20 @@ class Generator:
             except Exception:
                 history = []
 
-        # 添加新版本记录
-        history.append({
+        # 添加新记录
+        record = {
             "version": version,
+            "action": action,
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "emotion": emotion,
-            "summary": summary[:100] if summary else "",
-        })
+        }
+        if action == "create":
+            record["emotion"] = emotion
+            record["summary"] = summary[:100] if summary else ""
+        elif action == "restore":
+            record["from_version"] = version
+            record["summary"] = f"恢复到版本 v{version}"
+
+        history.append(record)
 
         # 写入历史记录
         import json
@@ -392,6 +404,9 @@ class Generator:
         meta_data = version_meta.read_text(encoding="utf-8")
         (output_dir / "meta.json").write_text(meta_data, encoding="utf-8")
 
+        # 记录恢复动作到版本历史
+        self._update_version_history(chapter_num, version, "", "", action="restore")
+
         return True
 
     def _update_and_backup_characters(self, characters: list[CharacterCard], content: str, chapter_num: int) -> None:
@@ -413,8 +428,8 @@ class Generator:
             # 先备份当前状态（保存更新前的状态）
             character.backup(chapter_num)
 
-            # 从正文中提取状态变化并更新
-            character.update_state_from_text(content)
+            # 从正文中提取状态变化并更新（使用严格模式，减少误判）
+            character.update_state_from_text(content, strict=True)
 
             # 保存更新后的角色卡到角色目录
             self._save_character(character)

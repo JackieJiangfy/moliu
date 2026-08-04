@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from .quickstart import check_continue, step_characters, step_direction, step_narrator, step_world
+from .steps import check_continue, step_characters, step_direction, step_narrator, step_world
 from .utils import QuickstartRollback, load_characters, load_config, load_narrator, load_world
 from moliu.engines.generator import Generator
 from moliu.engines.gateway import DeepSeekGateway
@@ -162,9 +162,11 @@ def quickstart(
         # 自动检测续传
         skip = check_continue(data_dir)
 
-    try:
+    # 异步执行主流程（避免 asyncio.run 嵌套）
+    async def _async_main():
+        nonlocal chosen_direction, world, chars
+
         # ========== Step 1/4: 故事方向 ==========
-        chosen_direction = ""
         if skip.get("direction", False):
             typer.echo("\n" + "=" * 50)
             typer.echo(">>> Step 1/4: 故事方向 [SKIP] <<<")
@@ -178,10 +180,9 @@ def quickstart(
             typer.echo("=" * 50)
 
             rollback.track(data_dir / "direction.txt")
-            chosen_direction = asyncio.run(step_direction(config, prompt, data_dir))
+            chosen_direction = await step_direction(config, prompt, data_dir)
 
         # ========== Step 2/4: 世界观 ==========
-        world = ""
         if skip.get("world", False):
             typer.echo("\n" + "=" * 50)
             typer.echo(">>> Step 2/4: 世界观 [SKIP] <<<")
@@ -194,10 +195,9 @@ def quickstart(
             typer.echo("=" * 50)
 
             rollback.track(data_dir / "world" / "world.yaml")
-            world = asyncio.run(step_world(config, chosen_direction, data_dir))
+            world = await step_world(config, chosen_direction, data_dir)
 
         # ========== Step 3/4: 角色 ==========
-        chars = []
         if skip.get("characters", False):
             typer.echo("\n" + "=" * 50)
             typer.echo(">>> Step 3/4: 角色 [SKIP] <<<")
@@ -209,7 +209,7 @@ def quickstart(
             typer.echo(">>> Step 3/4: 角色 <<<")
             typer.echo("=" * 50)
 
-            chars = asyncio.run(step_characters(config, chosen_direction, world, data_dir, rollback))
+            chars = await step_characters(config, chosen_direction, world, data_dir, rollback)
 
         # ========== Step 4/4: 叙述者 ==========
         if skip.get("narrator", False):
@@ -223,8 +223,14 @@ def quickstart(
             typer.echo("=" * 50)
 
             rollback.track(data_dir / "narrator.md")
-            asyncio.run(step_narrator(config, chosen_direction, world, chars, data_dir))
+            await step_narrator(config, chosen_direction, world, chars, data_dir)
 
+    chosen_direction = ""
+    world = ""
+    chars = []
+
+    try:
+        asyncio.run(_async_main())
     except KeyboardInterrupt:
         typer.echo("\n[!] 用户中断，回滚已写入的文件...")
         rollback.undo()

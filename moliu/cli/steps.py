@@ -38,9 +38,8 @@ async def generate_with_retry(
         await gw.close()
 
 
-def run_generate_with_retry(config: Config, template_name: str, user_prompt: str) -> str:
-    """同步包装的生成函数"""
-    return asyncio.run(generate_with_retry(config, template_name, user_prompt))
+# 注意：不再需要同步包装器 run_generate_with_retry
+# 所有调用处已改为直接 await generate_with_retry()
 
 
 def check_continue(data_dir: Path) -> dict[str, bool]:
@@ -121,7 +120,7 @@ def _get_step_description(key: str) -> str:
 async def step_direction(config: Config, prompt: str, data_dir: Path) -> str:
     """AI 出 3 个故事方向 → 人选择"""
     typer.echo("AI 正在分析你的想法，生成故事方向...")
-    directions_text = run_generate_with_retry(config, "quickstart_direction.system", prompt)
+    directions_text = await generate_with_retry(config, "quickstart_direction.system", prompt)
 
     blocks = re.split(r"\n\s*={3,}\s*\n", directions_text)
     blocks = [b.strip() for b in blocks if len(b.strip()) > 50]
@@ -145,7 +144,7 @@ async def step_direction(config: Config, prompt: str, data_dir: Path) -> str:
         ).strip().lower()
 
         if choice == "redo":
-            directions_text = run_generate_with_retry(config, "quickstart_direction.system", prompt)
+            directions_text = await generate_with_retry(config, "quickstart_direction.system", prompt)
             blocks = [b.strip() for b in re.split(r"\n\s*={3,}\s*\n", directions_text) if len(b.strip()) > 50]
             typer.echo("\n--- 重新生成 ---\n")
             for i, block in enumerate(blocks):
@@ -175,7 +174,7 @@ async def step_direction(config: Config, prompt: str, data_dir: Path) -> str:
 async def step_world(config: Config, prompt: str, data_dir: Path) -> str:
     """生成世界观 → 展示 → 人确认/修改"""
     typer.echo("AI 正在构建世界观...")
-    world_yaml = run_generate_with_retry(config, "quickstart_world.system", prompt)
+    world_yaml = await generate_with_retry(config, "quickstart_world.system", prompt)
     typer.echo("\n--- 世界观草案 ---\n")
     typer.echo(world_yaml)
 
@@ -188,12 +187,12 @@ async def step_world(config: Config, prompt: str, data_dir: Path) -> str:
         if choice in ("", "ok", "y", "yes"):
             break
         elif choice == "redo":
-            world_yaml = run_generate_with_retry(config, "quickstart_world.system", prompt)
+            world_yaml = await generate_with_retry(config, "quickstart_world.system", prompt)
             typer.echo("\n--- 重新生成 ---\n")
             typer.echo(world_yaml)
         else:
             revision_prompt = f"原设定:\n{world_yaml}\n\n修改意见: {choice}\n\n请根据修改意见调整世界观设定，输出完整的 YAML。"
-            world_yaml = run_generate_with_retry(config, "quickstart_world.system", revision_prompt)
+            world_yaml = await generate_with_retry(config, "quickstart_world.system", revision_prompt)
             typer.echo("\n--- 修改后 ---\n")
             typer.echo(world_yaml)
 
@@ -218,12 +217,12 @@ async def step_world(config: Config, prompt: str, data_dir: Path) -> str:
                 default="redo",
             ).strip().lower()
             if choice == "redo":
-                world_yaml = run_generate_with_retry(config, "quickstart_world.system", prompt)
+                world_yaml = await generate_with_retry(config, "quickstart_world.system", prompt)
                 typer.echo("\n--- 重新生成 ---\n")
                 typer.echo(world_yaml)
             else:
                 revision_prompt = f"原设定（YAML 格式错误）:\n{world_yaml}\n\n修改意见: {choice}\n\n请输出合法的 YAML。"
-                world_yaml = run_generate_with_retry(config, "quickstart_world.system", revision_prompt)
+                world_yaml = await generate_with_retry(config, "quickstart_world.system", revision_prompt)
                 typer.echo("\n--- 修正后 ---\n")
                 typer.echo(world_yaml)
 
@@ -242,7 +241,7 @@ async def step_characters(
     """生成角色 → 展示 → 人确认/逐个修改"""
     typer.echo("AI 正在设计角色...")
     user_prompt = f"故事方向: {prompt}\n\n世界观:\n{world}\n\n请生成 3 个初始角色的人设卡。"
-    chars_text = run_generate_with_retry(config, "quickstart_character.system", user_prompt)
+    chars_text = await generate_with_retry(config, "quickstart_character.system", user_prompt)
     blocks = split_character_blocks(chars_text)
 
     typer.echo(f"\n--- 角色方案 ({len(blocks)} 个) ---\n")
@@ -264,7 +263,7 @@ async def step_characters(
         if choice in ("", "ok", "y", "yes"):
             break
         elif choice == "redo":
-            chars_text = run_generate_with_retry(config, "quickstart_character.system", user_prompt)
+            chars_text = await generate_with_retry(config, "quickstart_character.system", user_prompt)
             blocks = split_character_blocks(chars_text)
             typer.echo("\n--- 重新生成 ---\n")
             for i, block in enumerate(blocks):
@@ -281,7 +280,7 @@ async def step_characters(
                 if 0 <= idx < len(blocks):
                     feedback = typer.prompt(f"修改意见（针对角色 {idx + 1}）")
                     rev_prompt = f"原角色:\n{blocks[idx]}\n\n修改意见: {feedback}\n\n请修改这个角色的人设卡，输出完整 YAML。"
-                    new_block = run_generate_with_retry(config, "quickstart_character.system", rev_prompt)
+                    new_block = await generate_with_retry(config, "quickstart_character.system", rev_prompt)
                     blocks[idx] = new_block
                     name = "?"
                     m = re.search(r'name:\s*"?([^"\n]+)"?', new_block)
@@ -317,7 +316,7 @@ async def step_narrator(config: Config, prompt: str, world: str, chars: list[str
     """生成叙述者风格 → 展示 → 人确认/修改"""
     typer.echo("AI 正在设计叙述者风格...")
     user_prompt = f"故事: {prompt}\n\n角色: {', '.join(chars)}\n\n请为这部小说设计叙述者风格。"
-    narrator_md = run_generate_with_retry(config, "quickstart_narrator.system", user_prompt)
+    narrator_md = await generate_with_retry(config, "quickstart_narrator.system", user_prompt)
     typer.echo("\n--- 叙述者风格草案 ---\n")
     typer.echo(narrator_md)
 
@@ -330,12 +329,12 @@ async def step_narrator(config: Config, prompt: str, world: str, chars: list[str
         if choice in ("", "ok", "y", "yes"):
             break
         elif choice == "redo":
-            narrator_md = run_generate_with_retry(config, "quickstart_narrator.system", user_prompt)
+            narrator_md = await generate_with_retry(config, "quickstart_narrator.system", user_prompt)
             typer.echo("\n--- 重新生成 ---\n")
             typer.echo(narrator_md)
         else:
             rev_prompt = f"原风格:\n{narrator_md}\n\n修改意见: {choice}\n\n请根据修改意见调整叙述者风格，输出完整 Markdown。"
-            narrator_md = run_generate_with_retry(config, "quickstart_narrator.system", rev_prompt)
+            narrator_md = await generate_with_retry(config, "quickstart_narrator.system", rev_prompt)
             typer.echo("\n--- 修改后 ---\n")
             typer.echo(narrator_md)
 

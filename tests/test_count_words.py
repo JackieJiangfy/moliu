@@ -35,7 +35,7 @@ class TestCountWords:
         assert count_words("AI Novel Writing Engine") == 4
 
     def test_english_case_insensitive(self):
-        """英文大小写不敏感"""
+        """大小写混合不影响计数"""
         assert count_words("Hello hello HELLO") == 3
 
     def test_english_with_numbers(self):
