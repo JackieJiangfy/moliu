@@ -10,7 +10,7 @@
 
 {{ character_context }}
 
-{% if chapter_guidance %}
+{% if chapter_guidance is defined and chapter_guidance %}
 {{ chapter_guidance }}
 {% endif %}
 

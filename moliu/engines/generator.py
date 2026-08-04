@@ -111,7 +111,9 @@ class Generator:
             )
             return f"第{chapter_num}章【摘要】{summary.strip()}"
         except Exception as e:
-            # 失败时回退到启发式方法
+            # 失败时回退到启发式方法，并输出 warning
+            import warnings
+            warnings.warn(f"LLM 摘要生成失败，回退到启发式方法。章节: {chapter_num}, 错误: {str(e)[:100]}")
             return self._extract_summary_from_text(content, chapter_num)
 
     def _extract_summary_from_text(self, content: str, chapter_num: int) -> str:
@@ -390,6 +392,7 @@ class Generator:
             narrator_guide=narrator_context if not narrator_card else "",
             character_context=character_context,
             banned_phrases=banned_phrases,
+            chapter_guidance=chapter_guidance,
         )
 
         opening_user = self.prompts.render(
@@ -417,14 +420,17 @@ class Generator:
             character_context=character_context,
             banned_phrases=banned_phrases,
             previous_content=opening_content,
+            chapter_guidance=chapter_guidance,
         )
 
+        # 发展部分：使用开场内容的情绪（从开场提取或默认），不传前文（这是本章内部）
+        opening_emotion = self._extract_emotion_from_text(opening_content) or last_emotion
         middle_user = self.prompts.render(
             "chapter_generate.user.j2",
             chapter_num=chapter_num,
             beat=f"{beat} — 发展部分",
-            last_emotion=last_emotion,
-            recent_chapters=recent_chapters,
+            last_emotion=opening_emotion,
+            recent_chapters="",  # 本章内部分段，不传前文
         )
 
         middle_content, middle_tokens = await self.gateway.generate(
@@ -444,14 +450,17 @@ class Generator:
             character_context=character_context,
             banned_phrases=banned_phrases,
             previous_content=opening_content + "\n\n" + middle_content,
+            chapter_guidance=chapter_guidance,
         )
 
+        # 结尾部分：使用发展部分的情绪，不传前文
+        middle_emotion = self._extract_emotion_from_text(middle_content) or opening_emotion
         ending_user = self.prompts.render(
             "chapter_generate.user.j2",
             chapter_num=chapter_num,
             beat=f"{beat} — 结尾部分",
-            last_emotion=last_emotion,
-            recent_chapters=recent_chapters,
+            last_emotion=middle_emotion,
+            recent_chapters="",  # 本章内部分段，不传前文
         )
 
         ending_content, ending_tokens = await self.gateway.generate(
@@ -473,6 +482,35 @@ class Generator:
             model_used=self.config.deepseek_model,
             tokens_used=total_tokens,
         )
+
+    def _extract_emotion_from_text(self, content: str) -> str | None:
+        """
+        从文本中简单提取情绪标签（用于分段生成时的情绪传递）
+        
+        Args:
+            content: 文本内容
+            
+        Returns:
+            情绪标签（如"紧张"、"轻松"等），无法提取则返回 None
+        """
+        # 简单的情绪词匹配
+        emotion_keywords = {
+            "紧张": ["紧张", "焦急", "急切", "焦虑", "不安", "慌张", "急促", "紧迫", "危机"],
+            "轻松": ["轻松", "悠闲", "惬意", "愉快", "欢乐", "开心", "温馨", "平静"],
+            "悲伤": ["悲伤", "难过", "伤心", "悲痛", "失落", "哀伤", "哭泣", "沮丧"],
+            "愤怒": ["愤怒", "生气", "恼怒", "暴怒", "愤慨", "火大", "暴跳如雷"],
+            "惊喜": ["惊喜", "惊讶", "震惊", "意外", "喜出望外", "大吃一惊"],
+            "危险": ["危险", "危机", "凶险", "紧急", "千钧一发", "命悬一线"],
+            "神秘": ["神秘", "诡异", "离奇", "不可思议", "扑朔迷离"],
+        }
+        
+        # 匹配情绪词
+        for emotion, keywords in emotion_keywords.items():
+            for keyword in keywords:
+                if keyword in content:
+                    return emotion
+        
+        return None
 
     def _merge_segments(self, opening: str, middle: str, ending: str) -> str:
         """

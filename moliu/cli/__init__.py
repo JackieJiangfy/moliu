@@ -54,6 +54,11 @@ def write(
         None, "--temperature", "-t",
         help="生成 temperature (0-2)，留空使用默认值",
     ),
+    segmented: bool = typer.Option(True, "--segmented/--no-segmented", help="是否使用分段生成（三幕结构）"),
+    chapter_type: str = typer.Option(
+        "auto", "--chapter-type",
+        help="章节类型: auto/normal/opening/setup/climax/transition/epilogue",
+    ),
 ):
     """生成一章正文"""
     config = load_config()
@@ -109,6 +114,8 @@ def write(
             recent_chapters=recent,
             narrator_card=narrator,
             temperature=temperature,
+            segmented=segmented,
+            chapter_type=chapter_type,
         )
         # 使用 LLM 生成高质量摘要
         filepath = await generator.async_save_chapter(result, emotion=emotion, characters=characters, use_llm_summary=True)
