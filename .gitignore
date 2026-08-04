@@ -1,0 +1,21 @@
+# 环境
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE
+.idea/
+
+# 项目数据（包含创作内容）
+data/
+output/
+
+# 设计文档（非代码）
+设计文档/
+
+# 测试临时文件
+test_output.txt
+.pytest_cache/

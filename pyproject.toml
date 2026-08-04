@@ -1,0 +1,17 @@
+[project]
+name = "moliu"
+version = "0.1.0"
+description = "墨流 - AI 小说创作工作流引擎"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.15",
+    "httpx>=0.28",
+    "tenacity>=9.0",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.7",
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+]
+
+[project.scripts]
+mo = "moliu.cli:app"
