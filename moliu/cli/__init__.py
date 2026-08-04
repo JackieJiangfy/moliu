@@ -5,8 +5,8 @@ from pathlib import Path
 
 import typer
 
-from moliu.cli.quickstart import check_continue, step_characters, step_direction, step_narrator, step_world
-from moliu.cli.utils import QuickstartRollback, load_characters, load_config, load_narrator, load_world
+from .quickstart import check_continue, step_characters, step_direction, step_narrator, step_world
+from .utils import QuickstartRollback, load_characters, load_config, load_narrator, load_world
 from moliu.engines.generator import Generator
 from moliu.engines.gateway import DeepSeekGateway
 from moliu.prompts.manager import PromptManager

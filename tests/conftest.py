@@ -94,7 +94,7 @@ def mock_gateway(mocker):
     """Mock 的 DeepSeekGateway - 不调用真实 API"""
     mock = AsyncMock(spec=DeepSeekGateway)
     mock.generate.return_value = ("测试响应内容", 100)
-    mock.close.return_value = asyncio.coroutine(lambda: None)()
+    mock.close = AsyncMock()
     return mock
 
 
