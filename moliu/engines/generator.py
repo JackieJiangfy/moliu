@@ -76,10 +76,46 @@ class Generator:
             return "\n\n".join(recent_chapters)
         return ""
 
-    def _extract_summary_from_text(self, content: str, chapter_num: int) -> str:
-        """从正文中提取摘要（备用方案）"""
-        import re
+    async def _generate_summary_with_llm(self, content: str, chapter_num: int) -> str:
+        """
+        使用 LLM 生成高质量摘要（主要方案）
         
+        Args:
+            content: 章节正文
+            chapter_num: 章节号
+            
+        Returns:
+            200字左右的高质量摘要
+        """
+        system_prompt = """你是一位专业的小说编辑。请为以下章节生成一篇200字左右的摘要。
+        
+摘要要求：
+1. 包含本章主要事件和转折点
+2. 保持故事连贯性和可读性
+3. 使用简洁的语言
+4. 保留关键角色的行动和动机
+5. 不要加入个人评价或分析
+6. 语言风格与原文保持一致
+
+输出格式：直接输出摘要内容，不需要额外说明。
+"""
+
+        user_prompt = f"第{chapter_num}章正文：\n\n{content[:3000]}\n\n---\n请为此章节生成200字左右的摘要："
+
+        try:
+            summary, _ = await self.gateway.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.3,
+                max_tokens=512,
+            )
+            return f"第{chapter_num}章【摘要】{summary.strip()}"
+        except Exception as e:
+            # 失败时回退到启发式方法
+            return self._extract_summary_from_text(content, chapter_num)
+
+    def _extract_summary_from_text(self, content: str, chapter_num: int) -> str:
+        """从正文中提取摘要（备用方案/降级方案）"""
         # 使用正则表达式按多种句末符号切分
         # 支持：句号。、感叹号！、问号？、省略号…、换行符
         sentences = re.split(r"[。！？…]+", content)
@@ -108,6 +144,8 @@ class Generator:
         narrator_card: NarratorCard | None = None,
         temperature: float | None = None,
         auto_recent: bool = True,
+        segmented: bool = True,
+        chapter_type: str = "normal",
     ) -> ChapterResult:
         """
         生成一章正文
@@ -123,11 +161,132 @@ class Generator:
             narrator_card: 叙述者人设卡（推荐使用，支持动态注入禁用套话）
             temperature: 覆盖默认 temperature
             auto_recent: 是否自动回灌前文（从 meta.json 提取）
+            segmented: 是否使用分段生成（三幕结构：opening/middle/ending）
+            chapter_type: 章节类型 (normal/opening/climax/transition/epilogue)
         """
         # 自动回灌前文
         if auto_recent and not recent_chapters:
             recent_chapters = self.load_recent_chapters(chapter_num)
 
+        # 解析章节类型
+        chapter_type = self._resolve_chapter_type(chapter_num, chapter_type)
+
+        if segmented:
+            return await self._generate_chapter_segmented(
+                chapter_num=chapter_num,
+                beat=beat,
+                characters=characters,
+                world=world,
+                last_emotion=last_emotion,
+                recent_chapters=recent_chapters,
+                narrator_guide=narrator_guide,
+                narrator_card=narrator_card,
+                temperature=temperature,
+                chapter_type=chapter_type,
+            )
+        else:
+            return await self._generate_chapter_single(
+                chapter_num=chapter_num,
+                beat=beat,
+                characters=characters,
+                world=world,
+                last_emotion=last_emotion,
+                recent_chapters=recent_chapters,
+                narrator_guide=narrator_guide,
+                narrator_card=narrator_card,
+                temperature=temperature,
+                chapter_type=chapter_type,
+            )
+
+    def _resolve_chapter_type(self, chapter_num: int, chapter_type: str) -> str:
+        """
+        解析章节类型，支持自动检测和手动指定
+
+        Args:
+            chapter_num: 章节号
+            chapter_type: 用户指定的章节类型
+
+        Returns:
+            解析后的章节类型
+        """
+        # 自动检测章节类型（如果用户没有指定或指定为 auto）
+        if chapter_type == "auto":
+            if chapter_num == 1:
+                return "opening"  # 第一章通常是开场
+            elif chapter_num <= 3:
+                return "setup"  # 前三章是铺垫
+            else:
+                return "normal"  # 默认是普通章节
+
+        # 验证章节类型
+        valid_types = ["normal", "opening", "setup", "climax", "transition", "epilogue"]
+        if chapter_type not in valid_types:
+            # 无效类型，回退到 normal
+            return "normal"
+
+        return chapter_type
+
+    def _get_chapter_guidance(self, chapter_type: str) -> str:
+        """
+        根据章节类型获取写作指导
+
+        Args:
+            chapter_type: 章节类型
+
+        Returns:
+            针对该类型章节的写作指导文本
+        """
+        guidance_map = {
+            "opening": """【章节类型：开场章】
+- 目标：引人入胜，建立世界观和主角
+- 节奏：缓慢铺垫，逐步展开
+- 重点：展示主角的日常/困境，埋下伏笔
+- 结尾：留下悬念或钩子""",
+            "setup": """【章节类型：铺垫章】
+- 目标：介绍配角、展开冲突
+- 节奏：平稳推进，信息交代
+- 重点：人物关系、背景设定
+- 结尾：为后续冲突做准备""",
+            "normal": """【章节类型：普通章】
+- 目标：推进主线剧情
+- 节奏：张弛有度
+- 重点：角色成长、情节发展
+- 结尾：自然过渡到下一章""",
+            "climax": """【章节类型：高潮章】
+- 目标：爆发冲突，达到顶点
+- 节奏：紧凑紧张，快速推进
+- 重点：战斗、对决、重大抉择
+- 结尾：给出阶段性结果或反转""",
+            "transition": """【章节类型：过渡章】
+- 目标：承上启下，转换场景
+- 节奏：相对舒缓
+- 重点：总结前情、铺垫后续
+- 结尾：明确下一段剧情方向""",
+            "epilogue": """【章节类型：收尾章】
+- 目标：收束故事或卷末
+- 节奏：缓慢收束
+- 重点：交代结局、展示成长
+- 结尾：留下回味空间""",
+        }
+        return guidance_map.get(chapter_type, guidance_map["normal"])
+
+    async def _generate_chapter_single(
+        self,
+        chapter_num: int,
+        beat: str,
+        characters: list[CharacterCard],
+        world: WorldSetting,
+        *,
+        last_emotion: str = "轻松",
+        recent_chapters: str = "",
+        narrator_guide: str = "",
+        narrator_card: NarratorCard | None = None,
+        temperature: float | None = None,
+        chapter_type: str = "normal",
+    ) -> ChapterResult:
+        """
+        单次调用生成一章（原始模式）
+        """
         # 组装角色上下文
         character_context = "\n\n".join(
             c.to_context() for c in characters
@@ -138,14 +297,14 @@ class Generator:
         banned_phrases: list[str] = []
 
         if narrator_card:
-            # 使用 NarratorCard 渲染上下文
             narrator_context = narrator_card.to_context()
-            # 动态提取禁用套话
             if narrator_card.banned_phrases:
                 banned_phrases = narrator_card.banned_phrases
         elif narrator_guide:
-            # 向后兼容：使用字符串格式的叙述者指南
             narrator_context = narrator_guide
+
+        # 根据章节类型获取写作指导
+        chapter_guidance = self._get_chapter_guidance(chapter_type)
 
         # 渲染 System Prompt
         system_prompt = self.prompts.render(
@@ -157,6 +316,7 @@ class Generator:
             banned_phrases=banned_phrases,
             min_words=self.config.chapter_min_words,
             max_words=self.config.chapter_max_words,
+            chapter_guidance=chapter_guidance,
         )
 
         # 渲染 User Prompt
@@ -175,7 +335,6 @@ class Generator:
             temperature=temperature,
         )
 
-        # 中英文混排字数统计
         word_count = count_words(content)
 
         return ChapterResult(
@@ -185,6 +344,175 @@ class Generator:
             model_used=self.config.deepseek_model,
             tokens_used=tokens,
         )
+
+    async def _generate_chapter_segmented(
+        self,
+        chapter_num: int,
+        beat: str,
+        characters: list[CharacterCard],
+        world: WorldSetting,
+        *,
+        last_emotion: str = "轻松",
+        recent_chapters: str = "",
+        narrator_guide: str = "",
+        narrator_card: NarratorCard | None = None,
+        temperature: float | None = None,
+        chapter_type: str = "normal",
+    ) -> ChapterResult:
+        """
+        分段生成一章（三幕结构：opening/middle/ending）
+        """
+        # 组装角色上下文
+        character_context = "\n\n".join(
+            c.to_context() for c in characters
+        )
+
+        # 准备叙述者相关变量
+        # 获取章节类型写作指导
+        chapter_guidance = self._get_chapter_guidance(chapter_type)
+        narrator_context = ""
+        banned_phrases: list[str] = []
+
+        if narrator_card:
+            narrator_context = narrator_card.to_context()
+            if narrator_card.banned_phrases:
+                banned_phrases = narrator_card.banned_phrases
+        elif narrator_guide:
+            narrator_context = narrator_guide
+
+        total_tokens = 0
+
+        # ========== Part 1: Opening (开场) ==========
+        opening_system = self.prompts.render(
+            "chapter_generate.opening.system.j2",
+            world_setting=world.to_context(),
+            narrator_card=narrator_context if narrator_card else "",
+            narrator_guide=narrator_context if not narrator_card else "",
+            character_context=character_context,
+            banned_phrases=banned_phrases,
+        )
+
+        opening_user = self.prompts.render(
+            "chapter_generate.user.j2",
+            chapter_num=chapter_num,
+            beat=f"{beat} — 开场部分",
+            last_emotion=last_emotion,
+            recent_chapters=recent_chapters,
+        )
+
+        opening_content, opening_tokens = await self.gateway.generate(
+            system_prompt=opening_system,
+            user_prompt=opening_user,
+            temperature=temperature,
+            max_tokens=2048,
+        )
+        total_tokens += opening_tokens
+
+        # ========== Part 2: Middle (发展) ==========
+        middle_system = self.prompts.render(
+            "chapter_generate.middle.system.j2",
+            world_setting=world.to_context(),
+            narrator_card=narrator_context if narrator_card else "",
+            narrator_guide=narrator_context if not narrator_card else "",
+            character_context=character_context,
+            banned_phrases=banned_phrases,
+            previous_content=opening_content,
+        )
+
+        middle_user = self.prompts.render(
+            "chapter_generate.user.j2",
+            chapter_num=chapter_num,
+            beat=f"{beat} — 发展部分",
+            last_emotion=last_emotion,
+            recent_chapters=recent_chapters,
+        )
+
+        middle_content, middle_tokens = await self.gateway.generate(
+            system_prompt=middle_system,
+            user_prompt=middle_user,
+            temperature=temperature,
+            max_tokens=2048,
+        )
+        total_tokens += middle_tokens
+
+        # ========== Part 3: Ending (结尾) ==========
+        ending_system = self.prompts.render(
+            "chapter_generate.ending.system.j2",
+            world_setting=world.to_context(),
+            narrator_card=narrator_context if narrator_card else "",
+            narrator_guide=narrator_context if not narrator_card else "",
+            character_context=character_context,
+            banned_phrases=banned_phrases,
+            previous_content=opening_content + "\n\n" + middle_content,
+        )
+
+        ending_user = self.prompts.render(
+            "chapter_generate.user.j2",
+            chapter_num=chapter_num,
+            beat=f"{beat} — 结尾部分",
+            last_emotion=last_emotion,
+            recent_chapters=recent_chapters,
+        )
+
+        ending_content, ending_tokens = await self.gateway.generate(
+            system_prompt=ending_system,
+            user_prompt=ending_user,
+            temperature=temperature,
+            max_tokens=2048,
+        )
+        total_tokens += ending_tokens
+
+        # 合并三部分内容
+        full_content = self._merge_segments(opening_content, middle_content, ending_content)
+        word_count = count_words(full_content)
+
+        return ChapterResult(
+            chapter_num=chapter_num,
+            content=full_content,
+            word_count=word_count,
+            model_used=self.config.deepseek_model,
+            tokens_used=total_tokens,
+        )
+
+    def _merge_segments(self, opening: str, middle: str, ending: str) -> str:
+        """
+        合并三部分内容，处理重复和过渡
+
+        Args:
+            opening: 开场部分
+            middle: 发展部分
+            ending: 结尾部分
+
+        Returns:
+            合并后的完整章节内容
+        """
+        segments = [opening.strip(), middle.strip(), ending.strip()]
+
+        # 移除每段末尾的换行
+        segments = [s.rstrip("\n") for s in segments]
+
+        # 检查重复（如果某段的开头与前一段的结尾重复，进行去重）
+        result = []
+        for i, segment in enumerate(segments):
+            if i == 0:
+                result.append(segment)
+            else:
+                # 检查当前段是否与前一段有重复
+                prev_end = result[-1][-50:] if len(result[-1]) > 50 else result[-1]
+                curr_start = segment[:50] if len(segment) > 50 else segment
+
+                if prev_end and curr_start and curr_start in prev_end:
+                    # 当前段开头与前段结尾重复，跳过重复部分
+                    result.append(segment[len(curr_start):].strip())
+                elif prev_end and curr_start and prev_end in curr_start:
+                    # 前段结尾在当前段开头中，跳过重复
+                    overlap = len(prev_end)
+                    result.append(segment[overlap:].strip())
+                else:
+                    result.append(segment)
+
+        # 用两个换行连接各段
+        return "\n\n\n".join([s for s in result if s])
 
     def _get_next_version(self, chapter_num: int) -> int:
         """
@@ -218,14 +546,39 @@ class Generator:
 
         return max_version + 1
 
-    def save_chapter(self, result: ChapterResult, emotion: str = "", summary: str = "", characters: list[CharacterCard] | None = None, version: int | None = None) -> Path:
+    async def async_save_chapter(self, result: ChapterResult, emotion: str = "", summary: str = "", characters: list[CharacterCard] | None = None, version: int | None = None, use_llm_summary: bool = True) -> Path:
         """
-        保存章节到文件，支持多版本管理
+        异步保存章节到文件，支持多版本管理和 LLM 摘要
 
         Args:
             result: 章节生成结果
             emotion: 章节情绪标签
             summary: 章节摘要（可选，若未提供则自动提取）
+            characters: 本章出场角色列表（用于状态更新和备份）
+            version: 指定版本号（None 表示自动递增）
+            use_llm_summary: 是否使用 LLM 生成摘要（True=LLM, False=启发式）
+
+        Returns:
+            正文文件路径
+        """
+        # 如果没有提供摘要，使用 LLM 生成（或回退到启发式）
+        if not summary:
+            if use_llm_summary:
+                llm_summary = await self._generate_summary_with_llm(result.content, result.chapter_num)
+                summary = llm_summary.replace(f"第{result.chapter_num}章【摘要】", "")
+            else:
+                summary = self._extract_summary_from_text(result.content, result.chapter_num).replace(f"第{result.chapter_num}章【摘要】", "")
+
+        return self.save_chapter(result, emotion, summary, characters, version)
+
+    def save_chapter(self, result: ChapterResult, emotion: str = "", summary: str = "", characters: list[CharacterCard] | None = None, version: int | None = None) -> Path:
+        """
+        保存章节到文件，支持多版本管理（同步版本，使用启发式摘要）
+
+        Args:
+            result: 章节生成结果
+            emotion: 章节情绪标签
+            summary: 章节摘要（可选，若未提供则使用启发式提取）
             characters: 本章出场角色列表（用于状态更新和备份）
             version: 指定版本号（None 表示自动递增）
 
@@ -262,7 +615,7 @@ class Generator:
         first_sentence = sentences[0] if sentences else ""
         last_sentence = sentences[-1] if sentences else ""
 
-        # 如果没有提供摘要，自动提取
+        # 如果没有提供摘要，使用启发式方法自动提取（同步回退）
         if not summary:
             summary = self._extract_summary_from_text(content, result.chapter_num).replace(f"第{result.chapter_num}章【摘要】", "")
 

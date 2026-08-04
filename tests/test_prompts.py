@@ -40,6 +40,7 @@ class TestPromptManager:
             banned_phrases=[],
             min_words=1800,
             max_words=3500,
+            chapter_guidance="",
         )
 
         assert "现代都市大学" in sys_p
@@ -104,6 +105,7 @@ class TestPromptManager:
             banned_phrases=[],
             min_words=1800,
             max_words=3500,
+            chapter_guidance="",
         )
         usr_p = prompts.render(
             "chapter_generate.user.j2",

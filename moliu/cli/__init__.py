@@ -110,7 +110,8 @@ def write(
             narrator_card=narrator,
             temperature=temperature,
         )
-        filepath = generator.save_chapter(result, characters=characters)
+        # 使用 LLM 生成高质量摘要
+        filepath = await generator.async_save_chapter(result, emotion=emotion, characters=characters, use_llm_summary=True)
         return result, filepath
 
     result, filepath = asyncio.run(_run())
