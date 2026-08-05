@@ -150,7 +150,7 @@ def write(
         assembler = StructuredAssembler(config)
         ctx = assembler.assemble(
             chapter_num, beat, characters, world,
-            narrator=narrator, narrator_guide=narrator_guide,
+            narrator=narrator, narrator_guide="",
             last_emotion=emotion, recent_override=recent,
         )
 
