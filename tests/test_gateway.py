@@ -21,8 +21,7 @@ class TestRetryLogic:
         )
         # 模拟 tenacity 的 RetryCallState
         attempt = MagicMock()
-        attempt.outcome.exception.return_value = exc
-        attempt.outcome.failed.return_value = True
+        attempt.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -37,8 +36,7 @@ class TestRetryLogic:
             response=MagicMock(status_code=429),
         )
         attempt = MagicMock()
-        attempt.outcome.exception.return_value = exc
-        attempt.outcome.failed.return_value = True
+        attempt.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -53,8 +51,7 @@ class TestRetryLogic:
             response=MagicMock(status_code=401),
         )
         attempt = MagicMock()
-        attempt.outcome.exception.return_value = exc
-        attempt.outcome.failed.return_value = True
+        attempt.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is False
@@ -65,8 +62,7 @@ class TestRetryLogic:
 
         exc = TimeoutException("Timeout")
         attempt = MagicMock()
-        attempt.outcome.exception.return_value = exc
-        attempt.outcome.failed.return_value = True
+        attempt.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -78,8 +74,7 @@ class TestRetryLogic:
 
         exc = ConnectError("Connection Refused")
         attempt = MagicMock()
-        attempt.outcome.exception.return_value = exc
-        attempt.outcome.failed.return_value = True
+        attempt.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -91,8 +86,7 @@ class TestRetryLogic:
 
         exc = ReadError("Read Error")
         attempt = MagicMock()
-        attempt.outcome.exception.return_value = exc
-        attempt.outcome.failed.return_value = True
+        attempt.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -102,7 +96,7 @@ class TestRetryLogic:
         from unittest.mock import MagicMock
 
         attempt = MagicMock()
-        attempt.outcome.failed.return_value = False
+        attempt.exception.return_value = None
 
         retry = _RetryIfServerError()
         assert retry(attempt) is False

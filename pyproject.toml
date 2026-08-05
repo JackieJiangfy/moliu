@@ -30,6 +30,7 @@ dev = [
     "ruff>=0.1",
     "mypy>=1.0",
 ]
+rag = ["chromadb>=0.5"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

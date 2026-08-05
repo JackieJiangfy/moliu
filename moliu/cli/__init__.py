@@ -1,6 +1,7 @@
 """墨流 CLI — 入口"""
 
 import asyncio
+import logging
 from pathlib import Path
 
 import typer
@@ -9,7 +10,15 @@ from .steps import check_continue, step_characters, step_direction, step_narrato
 from .utils import QuickstartRollback, load_characters, load_config, load_narrator, load_world
 from moliu.engines.generator import Generator
 from moliu.engines.gateway import DeepSeekGateway
+from moliu.engines.usage import UsageTracker
 from moliu.prompts.manager import PromptManager
+
+# 配置 logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 app = typer.Typer(
     name="mo",
@@ -104,24 +113,132 @@ def write(
     async def _run():
         gateway = DeepSeekGateway(config)
         prompts = PromptManager(config)
-        generator = Generator(config, gateway, prompts)
-        result = await generator.generate_chapter(
+
+        from moliu.engines.checker import ConsistencyChecker, AnchoredPreChecker
+        from moliu.engines.reader_eval import ReaderEvaluator
+        from moliu.rules.rhythm_tracker import RhythmTracker
+        from moliu.data.schemas import ChapterResult
+        from moliu.engines.generator import count_words
+        from moliu.orchestrator.pipeline import ChapterPipeline, QualityReport
+        from moliu.engines.usage import UsageTracker
+        from moliu.context.assembler import StructuredAssembler
+
+        checker = ConsistencyChecker(gateway)
+        prechecker = AnchoredPreChecker(gateway)
+        reader = ReaderEvaluator(gateway)
+        tracker = RhythmTracker(config.resolve_data_dir())
+        usage_tracker = UsageTracker(
+            config.resolve_data_dir() / "usage_log.jsonl",
+            monthly_budget=getattr(config, 'monthly_token_budget', 0),
+        )
+        gateway.usage_tracker = usage_tracker
+
+        pipeline = ChapterPipeline(
+            config, gateway, prompts,
+            checker=checker, prechecker=prechecker,
+            reader=reader, tracker=tracker,
+        )
+
+        # 1. 角色锚点预检
+        pre_ok, pre_text = await pipeline.run_pre_check(beat, characters, chapter_num=chapter_num)
+        if not pre_ok:
+            typer.echo(f"\r[WARN] 锚点预检: {pre_text[:100]}")
+        else:
+            typer.echo(f"\r[OK] 锚点预检通过")
+
+        # 2. 结构化上下文 (作家思维：大纲+人物表+伏笔+最近稿子)
+        assembler = StructuredAssembler(config)
+        ctx = assembler.assemble(
+            chapter_num, beat, characters, world,
+            narrator=narrator, narrator_guide=narrator_guide,
+            last_emotion=emotion, recent_override=recent,
+        )
+
+        # 3. 生成
+        result = await pipeline.generator.generate_chapter(
             chapter_num=chapter_num,
             beat=beat,
             characters=characters,
             world=world,
             last_emotion=emotion,
-            recent_chapters=recent,
+            recent_chapters=ctx.recent_chapters_full,
             narrator_card=narrator,
             temperature=temperature,
             segmented=segmented,
             chapter_type=chapter_type,
         )
-        # 使用 LLM 生成高质量摘要
-        filepath = await generator.async_save_chapter(result, emotion=emotion, characters=characters, use_llm_summary=True)
+
+        # 4. 去AI味检测 + 改写 (Phase 3)
+        from moliu.deai.detector import DeAIDetector
+        from moliu.deai.rewriter import DeAIRewriter
+        detector = DeAIDetector()
+        l1_report = detector.detect_l1(result.content)
+        if l1_report.hard_violations or l1_report.overall_score < 0.8:
+            typer.echo(f"去AI味: 评分{l1_report.overall_score:.2f} {len(l1_report.hard_violations)}项违规", nl=False)
+            rewriter = DeAIRewriter(gateway)
+            try:
+                rewritten = await rewriter.rewrite_flagged(
+                    result.content, l1_report.flagged_paragraphs[:3],
+                    chapter_num=chapter_num,
+                )
+                if rewritten != result.content:
+                    result = ChapterResult(
+                        chapter_num=result.chapter_num,
+                        content=rewritten,
+                        word_count=count_words(rewritten),
+                        model_used=result.model_used,
+                        tokens_used=result.tokens_used,
+                    )
+                    typer.echo(f"\r去AI味: {l1_report.overall_score:.2f}→已改写")
+            except Exception:
+                typer.echo(f"\r去AI味: {l1_report.overall_score:.2f} (改写跳过)")
+
+        # 5. 质检 (try/except — 质检失败不阻塞章节保存)
+        qr = QualityReport()
+        try:
+            typer.echo("运行质量检查...", nl=False)
+            qr = await pipeline.run_quality_checks(result, beat, characters, world, narrator, chapter_num=chapter_num)
+            typer.echo(f"\r质检: {qr.consistency_fatal}致命 {qr.consistency_warn}警告 | 读者: {'想继续' if qr.reader_want_next else '不想继续'} | 张力: {qr.tension_score}/10")
+        except Exception as e:
+            typer.echo(f"\r[WARN] 质检跳过 ({str(e)[:80]}), 正文已生成")
+
+        # 6. 伏笔提醒 (Phase 3)
+        from moliu.rules.foreshadow_watch import ForeshadowManager
+        fwm = ForeshadowManager(config.resolve_data_dir())
+        foreshadow_alerts = fwm.check_alerts(chapter_num)
+        if foreshadow_alerts:
+            typer.echo(f"伏笔: {len(foreshadow_alerts)} 条提醒")
+            for a in foreshadow_alerts[:3]:
+                typer.echo(f"  [!] {a[:100]}")
+
+        # 7. 落盘 + 写记忆 + 记节奏
+        summary_text = await pipeline.generator._generate_summary_with_llm(result.content, chapter_num)
+        clean_summary = summary_text.replace(f"第{chapter_num}章【摘要】", "")
+
+        pipeline.save_meta(chapter_num, result, qr, clean_summary, emotion, characters)
+        pipeline.save_to_memory(chapter_num, result, clean_summary, emotion, characters)
+        pipeline.save_rhythm_record(chapter_num, result, qr, chapter_type, emotion)
+
+        filepath = config.resolve_output_dir() / f"第{chapter_num}章" / "正文.md"
         return result, filepath
 
-    result, filepath = asyncio.run(_run())
+    try:
+        result, filepath = asyncio.run(_run())
+    except Exception as e:
+        typer.echo("\r" + " " * 20 + "\r", nl=False)
+        typer.echo(f"[ERROR] 生成失败: {str(e)[:150]}")
+        # 提示用户可以使用 retry-segment 命令
+        import os
+        segment_dir = config.resolve_data_dir() / f"chapter_{chapter_num:03d}" / "segments"
+        if segment_dir.exists() and any(segment_dir.iterdir()):
+            saved_segments = [f.stem for f in segment_dir.glob("*.txt") if f.stem != "beat"]
+            if saved_segments:
+                typer.echo(f"[INFO] 已保存的分段: {', '.join(saved_segments)}")
+                typer.echo(f"[INFO] 可用 mo retry-segment {chapter_num} 从失败位置继续")
+            else:
+                # 只有 beat.txt，没有可恢复的分段
+                typer.echo(f"[INFO] 无分段已保存，请重新运行 mo write {chapter_num}")
+        raise typer.Exit(code=1)
 
     typer.echo("\r" + " " * 20 + "\r", nl=False)
     typer.echo(f"[OK] 第 {result.chapter_num} 章 生成完成")
@@ -256,6 +373,130 @@ def quickstart(
 
 
 @app.command()
+def retry_segment(
+    chapter_num: int = typer.Argument(..., help="章节号"),
+):
+    """从分段失败处重试生成章节"""
+    config = load_config()
+    gateway = DeepSeekGateway(config)
+    prompts = PromptManager(config)
+    generator = Generator(config, gateway, prompts)
+
+    from moliu.memory.store import MemoryStore
+    from moliu.memory.retriever import Retriever
+    from moliu.engines.checker import ConsistencyChecker
+    from moliu.engines.reader_eval import ReaderEvaluator
+    from moliu.rules.rhythm_tracker import RhythmTracker
+    from moliu.orchestrator.pipeline import ChapterPipeline, QualityReport
+    from moliu.engines.usage import UsageTracker
+
+    memory = MemoryStore(str(config.resolve_data_dir() / "memory_db"))
+    retriever = Retriever(config, memory)
+    checker = ConsistencyChecker(gateway)
+    reader = ReaderEvaluator(gateway)
+    tracker = RhythmTracker(config.resolve_data_dir())
+    usage_tracker = UsageTracker(
+        config.resolve_data_dir() / "usage_log.jsonl",
+        monthly_budget=getattr(config, 'monthly_token_budget', 0),
+    )
+    gateway.usage_tracker = usage_tracker
+
+    pipeline = ChapterPipeline(
+        config, gateway, prompts,
+        memory=memory, retriever=retriever,
+        checker=checker, reader=reader, tracker=tracker,
+    )
+
+    # 检查已保存的分段
+    saved_segments = generator._list_saved_segments(chapter_num)
+    
+    if not saved_segments:
+        typer.echo(f"[!] 没有找到第{chapter_num}章的分段数据")
+        raise typer.Exit(code=1)
+    
+    typer.echo(f"[OK] 已找到的分段: {', '.join(saved_segments)}")
+    
+    # 确定从哪里开始重试
+    if "ending" in saved_segments:
+        typer.echo("[!] 所有分段都已完成，无需重试")
+        raise typer.Exit(code=0)
+    elif "middle" in saved_segments:
+        resume_from = "ending"
+        typer.echo(f"[>] 从 ending 部分继续")
+    elif "opening" in saved_segments:
+        resume_from = "middle"
+        typer.echo(f"[>] 从 middle 部分继续")
+    else:
+        typer.echo("[!] 没有找到可恢复的分段")
+        raise typer.Exit(code=1)
+    
+    # 加载角色和世界观
+    characters = load_characters(config)
+    world = load_world(config)
+    narrator = load_narrator(config)
+    
+    if not characters:
+        typer.echo("[!] 没有找到角色，请先运行 mo quickstart")
+        raise typer.Exit(code=1)
+    
+    # 从保存的分段中加载原始 beat
+    beat = generator._load_beat(chapter_num)
+    if not beat:
+        beat = f"第{chapter_num}章"
+    typer.echo(f"[INFO] 使用节拍: {beat[:30]}..." if len(beat) > 30 else f"[INFO] 使用节拍: {beat}")
+    
+    # 从保存的分段中加载原始 chapter_type
+    original_chapter_type = generator._load_chapter_type(chapter_num)
+    typer.echo(f"[INFO] 章节类型: {original_chapter_type}")
+    
+    # 异步重试函数
+    async def _async_retry():
+        typer.echo(f"\n[*] 开始重试生成第{chapter_num}章...")
+        result = await pipeline.generator.generate_chapter(
+            chapter_num=chapter_num,
+            beat=beat,
+            characters=characters,
+            world=world,
+            last_emotion="轻松",
+            recent_chapters="",
+            narrator_card=narrator,
+            segmented=True,
+            chapter_type=original_chapter_type,
+            resume_from=resume_from,
+        )
+
+        # 质检 (try/except — 不阻塞)
+        qr = QualityReport()
+        try:
+            qr = await pipeline.run_quality_checks(result, beat, characters, world, narrator, chapter_num=chapter_num)
+        except Exception:
+            pass
+
+        # 落盘 + 记忆 + 节奏
+        summary_text = await pipeline.generator._generate_summary_with_llm(result.content, chapter_num)
+        clean_summary = summary_text.replace(f"第{chapter_num}章【摘要】", "")
+        pipeline.save_meta(chapter_num, result, qr, clean_summary, "轻松", characters)
+        pipeline.save_to_memory(chapter_num, result, clean_summary, "轻松", characters)
+        pipeline.save_rhythm_record(chapter_num, result, qr, original_chapter_type, "轻松")
+
+        # 清理临时分段文件
+        pipeline.generator._clear_segments(chapter_num)
+        return result, config.resolve_output_dir() / f"第{chapter_num}章" / "正文.md"
+    
+    try:
+        result, filepath = asyncio.run(_async_retry())
+        typer.echo(f"\n[OK] 第{chapter_num}章生成完成!")
+        typer.echo(f"  字数: {result.word_count}")
+        typer.echo(f"  保存: {filepath}")
+        
+    except Exception as e:
+        typer.echo(f"\n[!] 生成失败: {str(e)}")
+        typer.echo(f"    已保存的分段: {generator._list_saved_segments(chapter_num)}")
+        typer.echo(f"    可以再次运行 mo retry-segment {chapter_num} 重试")
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def init():
     """初始化项目目录结构"""
     config = load_config()
@@ -308,6 +549,114 @@ state:
     typer.echo("  3. 编辑 data/characters/*.yaml")
     typer.echo('  4. 运行: mo write 1 "主角获得系统，完成第一个任务"')
     typer.echo("  或使用快速开始: mo quickstart -p \"你的小说描述\"")
+
+
+@app.command()
+def check(
+    chapter_num: int = typer.Argument(..., help="要检查的章节号"),
+    characters_filter: str = typer.Option(
+        "", "--characters", "-c",
+        help="出场角色名，逗号分隔",
+    ),
+):
+    """对已生成的章节运行一致性检查 + 读者体验评估"""
+    config = load_config()
+
+    output_dir = config.resolve_output_dir()
+    chapter_path = output_dir / f"第{chapter_num}章" / "正文.md"
+    if not chapter_path.exists():
+        typer.echo(f"[ERROR] 第{chapter_num}章不存在")
+        raise typer.Exit(code=1)
+
+    content = chapter_path.read_text(encoding="utf-8")
+    all_characters = load_characters(config)
+    if characters_filter:
+        names = [n.strip() for n in characters_filter.split(",")]
+        characters = [c for c in all_characters if c.name in names]
+    else:
+        characters = all_characters
+
+    world = load_world(config)
+    narrator = load_narrator(config)
+
+    if not world:
+        typer.echo("[ERROR] 世界观未创建")
+        raise typer.Exit(code=1)
+
+    from moliu.engines.checker import ConsistencyChecker
+    from moliu.engines.reader_eval import ReaderEvaluator
+    from moliu.rules.rhythm_tracker import TensionScorer
+
+    async def _run():
+        gw = DeepSeekGateway(config)
+        try:
+            checker = ConsistencyChecker(gw)
+            reader = ReaderEvaluator(gw)
+
+            typer.echo(f"=== 第{chapter_num}章 质检 ===")
+            typer.echo("运行一致性检查...", nl=False)
+            report = await checker.check(content, characters, world, narrator)
+            typer.echo(f"\r一致性: {report.fatal_count}致命 {report.warning_count}警告 {report.info_count}提示")
+
+            typer.echo("运行读者评估...", nl=False)
+            fb = await reader.evaluate(content)
+            typer.echo(f"\r读者: {'想继续' if fb.want_next else '不想继续'}"
+                       f"{' (感觉重复)' if fb.feels_repetitive else ''}")
+
+            tension = TensionScorer.score(content)
+            typer.echo(f"张力评分: {tension}/10")
+
+            # 保存报告
+            report_path = output_dir / f"第{chapter_num}章" / "质量报告.md"
+            lines = [
+                f"# 第{chapter_num}章 质检报告",
+                "",
+                "## 一致性检查",
+                report.to_text(),
+                "",
+                "## 读者评估",
+                fb.summary(),
+                "",
+                f"## 张力评分: {tension}/10",
+                "",
+                "## 读者原始反馈",
+                fb.raw_feedback,
+            ]
+            report_path.write_text("\n\n".join(lines), encoding="utf-8")
+            typer.echo(f"报告已保存: {report_path}")
+
+            if report.fatal_count > 0:
+                typer.echo("\n[WARN] 发现致命问题，建议修复后再继续")
+            else:
+                typer.echo("\n[OK] 质检通过")
+        finally:
+            await gw.close()
+    asyncio.run(_run())
+
+
+@app.command()
+def usage():
+    """查看 Token 用量统计"""
+    config = load_config()
+    from moliu.engines.usage import UsageTracker
+
+    tracker = UsageTracker(
+        config.resolve_data_dir() / "usage_log.jsonl",
+        monthly_budget=getattr(config, 'monthly_token_budget', 0),
+    )
+
+    typer.echo("=== Token 用量统计 ===")
+    typer.echo(f"今日: {tracker.today():,}")
+    typer.echo(f"本周: {tracker.this_week():,}")
+    typer.echo(f"本月: {tracker.this_month():,}")
+    typer.echo(f"预算: {tracker.budget_status()}")
+    typer.echo(f"平均每章: {tracker.average_per_chapter():.0f} tokens")
+
+    by_ch = tracker.by_chapter()
+    if by_ch:
+        typer.echo("\n每章用量:")
+        for ch in sorted(by_ch):
+            typer.echo(f"  第{ch}章: {by_ch[ch]:,}")
 
 
 if __name__ == "__main__":

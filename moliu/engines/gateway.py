@@ -23,15 +23,16 @@ class _RetryIfServerError(retry_base):
     """只重试 5xx 和 429；4xx（鉴权/参数错误）不重试"""
 
     def __call__(self, attempt):
-        if attempt.outcome.failed():
-            exc = attempt.outcome.exception()
-            if isinstance(exc, httpx.HTTPStatusError):
-                code = exc.response.status_code
-                return code >= 500 or code == 429
-            if isinstance(exc, httpx.TimeoutException):
-                return True
-            if isinstance(exc, (httpx.ConnectError, httpx.ReadError)):
-                return True
+        exc = attempt.exception()
+        if exc is None:
+            return False
+        if isinstance(exc, httpx.HTTPStatusError):
+            code = exc.response.status_code
+            return code >= 500 or code == 429
+        if isinstance(exc, httpx.TimeoutException):
+            return True
+        if isinstance(exc, (httpx.ConnectError, httpx.ReadError)):
+            return True
         return False
 
 
@@ -40,6 +41,7 @@ class DeepSeekGateway:
 
     def __init__(self, config: Config):
         self.config = config
+        self.usage_tracker = None  # set by caller for token logging
         self._client = httpx.AsyncClient(
             base_url=config.deepseek_base_url,
             headers={
@@ -55,6 +57,7 @@ class DeepSeekGateway:
         user_prompt: str,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        chapter_num: int | None = None,
     ) -> tuple[str, int]:
         temp = temperature if temperature is not None else self.config.default_temperature
         max_tok = max_tokens if max_tokens is not None else self.config.default_max_tokens
@@ -88,6 +91,15 @@ class DeepSeekGateway:
                         f"API 返回格式异常: {e}. 原始响应: {str(data)[:500]}"
                     ) from e
                 tokens = data.get("usage", {}).get("total_tokens", 0)
+                prompt_tok = data.get("usage", {}).get("prompt_tokens", 0)
+                completion_tok = data.get("usage", {}).get("completion_tokens", 0)
+                if self.usage_tracker:
+                    self.usage_tracker.log(
+                        command="generate", model=self.config.deepseek_model,
+                        tokens=tokens, prompt_tokens=prompt_tok,
+                        completion_tokens=completion_tok,
+                        chapter_num=chapter_num,
+                    )
                 return content, tokens
 
     async def close(self) -> None:

@@ -102,6 +102,9 @@ class Generator:
 
         user_prompt = f"第{chapter_num}章正文：\n\n{content[:3000]}\n\n---\n请为此章节生成200字左右的摘要："
 
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             summary, _ = await self.gateway.generate(
                 system_prompt=system_prompt,
@@ -112,8 +115,7 @@ class Generator:
             return f"第{chapter_num}章【摘要】{summary.strip()}"
         except Exception as e:
             # 失败时回退到启发式方法，并输出 warning
-            import warnings
-            warnings.warn(f"LLM 摘要生成失败，回退到启发式方法。章节: {chapter_num}, 错误: {str(e)[:100]}")
+            logger.warning(f"LLM 摘要生成失败，回退到启发式方法。章节: {chapter_num}, 错误: {str(e)[:100]}")
             return self._extract_summary_from_text(content, chapter_num)
 
     def _extract_summary_from_text(self, content: str, chapter_num: int) -> str:
@@ -148,6 +150,7 @@ class Generator:
         auto_recent: bool = True,
         segmented: bool = True,
         chapter_type: str = "normal",
+        resume_from: str | None = None,  # 用于分段重试
     ) -> ChapterResult:
         """
         生成一章正文
@@ -165,13 +168,14 @@ class Generator:
             auto_recent: 是否自动回灌前文（从 meta.json 提取）
             segmented: 是否使用分段生成（三幕结构：opening/middle/ending）
             chapter_type: 章节类型 (normal/opening/climax/transition/epilogue)
+            resume_from: 分段重试时从哪里继续 ("middle" 或 "ending")
         """
         # 自动回灌前文
         if auto_recent and not recent_chapters:
             recent_chapters = self.load_recent_chapters(chapter_num)
 
-        # 解析章节类型
-        chapter_type = self._resolve_chapter_type(chapter_num, chapter_type)
+        # 解析章节类型 (LLM 优先，回退启发式)
+        chapter_type = await self._resolve_chapter_type_with_llm(chapter_num, chapter_type, beat)
 
         if segmented:
             return await self._generate_chapter_segmented(
@@ -185,6 +189,7 @@ class Generator:
                 narrator_card=narrator_card,
                 temperature=temperature,
                 chapter_type=chapter_type,
+                resume_from=resume_from,
             )
         else:
             return await self._generate_chapter_single(
@@ -211,22 +216,93 @@ class Generator:
         Returns:
             解析后的章节类型
         """
-        # 自动检测章节类型（如果用户没有指定或指定为 auto）
-        if chapter_type == "auto":
-            if chapter_num == 1:
-                return "opening"  # 第一章通常是开场
-            elif chapter_num <= 3:
-                return "setup"  # 前三章是铺垫
-            else:
-                return "normal"  # 默认是普通章节
-
-        # 验证章节类型
-        valid_types = ["normal", "opening", "setup", "climax", "transition", "epilogue"]
-        if chapter_type not in valid_types:
+        # 手动指定的类型直接返回
+        if chapter_type != "auto":
+            valid_types = ["normal", "opening", "setup", "climax", "transition", "epilogue"]
+            if chapter_type in valid_types:
+                return chapter_type
             # 无效类型，回退到 normal
             return "normal"
 
-        return chapter_type
+        # auto 模式：使用启发式规则（快速路径）
+        # 第一章通常是开场
+        if chapter_num == 1:
+            return "opening"
+        # 前三章是铺垫
+        elif chapter_num <= 3:
+            return "setup"
+        # 默认是普通章节
+        else:
+            return "normal"
+
+    async def _resolve_chapter_type_with_llm(self, chapter_num: int, chapter_type: str, beat: str) -> str:
+        """
+        解析章节类型，支持 LLM 智能判断
+
+        Args:
+            chapter_num: 章节号
+            chapter_type: 用户指定的章节类型
+            beat: 本章节拍（用于 LLM 判断）
+
+        Returns:
+            解析后的章节类型
+        """
+        # 手动指定的类型直接返回
+        if chapter_type != "auto":
+            valid_types = ["normal", "opening", "setup", "climax", "transition", "epilogue"]
+            if chapter_type in valid_types:
+                return chapter_type
+            return "normal"
+
+        # 第一章固定为开场（不需要 LLM 判断）
+        if chapter_num == 1:
+            return "opening"
+
+        # 最后一章固定为收尾
+        # （这里我们不知道总章节数，所以使用 LLM 判断）
+
+        # 使用 LLM 判断章节类型
+        try:
+            system_prompt = """你是一个小说编辑专家，请根据章节节拍判断章节类型。
+
+章节类型说明：
+- opening: 开场章，介绍世界观和主要人物
+- setup: 铺垫章，为后续冲突做准备
+- normal: 普通章，推进主线剧情
+- climax: 高潮章，爆发重大冲突
+- transition: 过渡章，承上启下
+- epilogue: 收尾章，收束故事或卷末
+
+请只输出章节类型名称，不需要其他解释。
+"""
+
+            user_prompt = f"章节号: {chapter_num}\n章节节拍: {beat}\n\n请判断这个章节的类型:"
+
+            result, _ = await self.gateway.generate(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=0.1,
+                max_tokens=10,
+            )
+
+            result = result.strip()
+            valid_types = ["normal", "opening", "setup", "climax", "transition", "epilogue"]
+            if result in valid_types:
+                return result
+        except Exception as e:
+            # LLM 调用失败，回退到启发式规则
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"LLM 章节类型判断失败，回退到启发式规则: {str(e)[:50]}")
+            pass
+
+        # 回退到启发式规则
+        if chapter_num == 1:
+            return "opening"
+        elif chapter_num <= 3:
+            return "setup"
+        else:
+            return "normal"
 
     def _get_chapter_guidance(self, chapter_type: str) -> str:
         """
@@ -360,9 +436,14 @@ class Generator:
         narrator_card: NarratorCard | None = None,
         temperature: float | None = None,
         chapter_type: str = "normal",
+        resume_from: str | None = None,  # "middle" 或 "ending"，用于重试
     ) -> ChapterResult:
         """
         分段生成一章（三幕结构：opening/middle/ending）
+        
+        支持中间结果落盘和重试：
+        - 每段生成完成后自动保存到临时文件
+        - 如果某段失败，下次可以从失败位置继续
         """
         # 组装角色上下文
         character_context = "\n\n".join(
@@ -383,33 +464,51 @@ class Generator:
             narrator_context = narrator_guide
 
         total_tokens = 0
+        
+        # 检查是否有需要恢复的中间结果
+        opening_content = ""
+        middle_content = ""
+        
+        # 尝试从临时文件恢复
+        if resume_from:
+            opening_content = self._load_segment(chapter_num, "opening")
+            if resume_from == "ending":
+                middle_content = self._load_segment(chapter_num, "middle")
+        else:
+            # 新生成时保存 beat 和 chapter_type
+            self._save_segment(chapter_num, "beat", beat)
+            self._save_segment(chapter_num, "chapter_type", chapter_type)
 
         # ========== Part 1: Opening (开场) ==========
-        opening_system = self.prompts.render(
-            "chapter_generate.opening.system.j2",
-            world_setting=world.to_context(),
-            narrator_card=narrator_context if narrator_card else "",
-            narrator_guide=narrator_context if not narrator_card else "",
-            character_context=character_context,
-            banned_phrases=banned_phrases,
-            chapter_guidance=chapter_guidance,
-        )
+        if not opening_content:  # 只有在没有恢复内容时才生成
+            opening_system = self.prompts.render(
+                "chapter_generate.opening.system.j2",
+                world_setting=world.to_context(),
+                narrator_card=narrator_context if narrator_card else "",
+                narrator_guide=narrator_context if not narrator_card else "",
+                character_context=character_context,
+                banned_phrases=banned_phrases,
+                chapter_guidance=chapter_guidance,
+            )
 
-        opening_user = self.prompts.render(
-            "chapter_generate.user.j2",
-            chapter_num=chapter_num,
-            beat=f"{beat} — 开场部分",
-            last_emotion=last_emotion,
-            recent_chapters=recent_chapters,
-        )
+            opening_user = self.prompts.render(
+                "chapter_generate.user.j2",
+                chapter_num=chapter_num,
+                beat=f"{beat} — 开场部分",
+                last_emotion=last_emotion,
+                recent_chapters=recent_chapters,
+            )
 
-        opening_content, opening_tokens = await self.gateway.generate(
-            system_prompt=opening_system,
-            user_prompt=opening_user,
-            temperature=temperature,
-            max_tokens=2048,
-        )
-        total_tokens += opening_tokens
+            opening_content, opening_tokens = await self.gateway.generate(
+                system_prompt=opening_system,
+                user_prompt=opening_user,
+                temperature=temperature,
+                max_tokens=2048,
+            )
+            total_tokens += opening_tokens
+            
+            # 保存中间结果
+            self._save_segment(chapter_num, "opening", opening_content)
 
         # ========== Part 2: Middle (发展) ==========
         middle_system = self.prompts.render(
@@ -423,23 +522,27 @@ class Generator:
             chapter_guidance=chapter_guidance,
         )
 
-        # 发展部分：使用开场内容的情绪（从开场提取或默认），不传前文（这是本章内部）
-        opening_emotion = self._extract_emotion_from_text(opening_content) or last_emotion
-        middle_user = self.prompts.render(
-            "chapter_generate.user.j2",
-            chapter_num=chapter_num,
-            beat=f"{beat} — 发展部分",
-            last_emotion=opening_emotion,
-            recent_chapters="",  # 本章内部分段，不传前文
-        )
+        if not middle_content:  # 只有在没有恢复内容时才生成
+            # 发展部分：使用开场内容的情绪（从开场提取或默认），不传前文（这是本章内部）
+            opening_emotion = self._extract_emotion_from_text(opening_content) or last_emotion
+            middle_user = self.prompts.render(
+                "chapter_generate.user.j2",
+                chapter_num=chapter_num,
+                beat=f"{beat} — 发展部分",
+                last_emotion=opening_emotion,
+                recent_chapters="",  # 本章内部分段，不传前文
+            )
 
-        middle_content, middle_tokens = await self.gateway.generate(
-            system_prompt=middle_system,
-            user_prompt=middle_user,
-            temperature=temperature,
-            max_tokens=2048,
-        )
-        total_tokens += middle_tokens
+            middle_content, middle_tokens = await self.gateway.generate(
+                system_prompt=middle_system,
+                user_prompt=middle_user,
+                temperature=temperature,
+                max_tokens=2048,
+            )
+            total_tokens += middle_tokens
+            
+            # 保存中间结果
+            self._save_segment(chapter_num, "middle", middle_content)
 
         # ========== Part 3: Ending (结尾) ==========
         ending_system = self.prompts.render(
@@ -470,6 +573,9 @@ class Generator:
             max_tokens=2048,
         )
         total_tokens += ending_tokens
+        
+        # 保存中间结果
+        self._save_segment(chapter_num, "ending", ending_content)
 
         # 合并三部分内容
         full_content = self._merge_segments(opening_content, middle_content, ending_content)
@@ -483,9 +589,65 @@ class Generator:
             tokens_used=total_tokens,
         )
 
+    def _get_segment_dir(self, chapter_num: int) -> Path:
+        """获取分段临时文件目录"""
+        segment_dir = self.config.resolve_data_dir() / f"chapter_{chapter_num:03d}" / "segments"
+        segment_dir.mkdir(parents=True, exist_ok=True)
+        return segment_dir
+
+    def _save_segment(self, chapter_num: int, segment_name: str, content: str) -> None:
+        """保存分段内容到临时文件"""
+        segment_dir = self._get_segment_dir(chapter_num)
+        segment_file = segment_dir / f"{segment_name}.txt"
+        segment_file.write_text(content, encoding="utf-8")
+
+    def _load_segment(self, chapter_num: int, segment_name: str) -> str:
+        """从临时文件加载分段内容"""
+        segment_file = self._get_segment_dir(chapter_num) / f"{segment_name}.txt"
+        if segment_file.exists():
+            return segment_file.read_text(encoding="utf-8")
+        return ""
+
+    def _list_saved_segments(self, chapter_num: int) -> list[str]:
+        """列出已保存的分段"""
+        segment_dir = self._get_segment_dir(chapter_num)
+        if not segment_dir.exists():
+            return []
+        segments = []
+        for segment_name in ["opening", "middle", "ending"]:
+            if (segment_dir / f"{segment_name}.txt").exists():
+                segments.append(segment_name)
+        return segments
+
+    def _load_beat(self, chapter_num: int) -> str:
+        """从临时文件加载原始 beat"""
+        segment_file = self._get_segment_dir(chapter_num) / "beat.txt"
+        if segment_file.exists():
+            return segment_file.read_text(encoding="utf-8")
+        return ""
+
+    def _load_chapter_type(self, chapter_num: int) -> str:
+        """从临时文件加载原始 chapter_type"""
+        segment_file = self._get_segment_dir(chapter_num) / "chapter_type.txt"
+        if segment_file.exists():
+            return segment_file.read_text(encoding="utf-8")
+        return "auto"
+
+    def _clear_segments(self, chapter_num: int) -> None:
+        """清理分段临时文件（章节生成完成后调用）"""
+        segment_dir = self._get_segment_dir(chapter_num)
+        if segment_dir.exists():
+            import shutil
+            shutil.rmtree(segment_dir, ignore_errors=True)
+
     def _extract_emotion_from_text(self, content: str) -> str | None:
         """
-        从文本中简单提取情绪标签（用于分段生成时的情绪传递）
+        从文本中提取情绪标签（用于分段生成时的情绪传递）
+        
+        改进版：
+        - 只分析文本最后 200 字（更能反映当前情绪状态）
+        - 统计每种情绪的命中次数
+        - 返回命中次数最多的情绪
         
         Args:
             content: 文本内容
@@ -493,22 +655,39 @@ class Generator:
         Returns:
             情绪标签（如"紧张"、"轻松"等），无法提取则返回 None
         """
-        # 简单的情绪词匹配
+        # 只看最后 200 字
+        content = content[-200:] if len(content) > 200 else content
+        
+        # 情绪关键词映射
         emotion_keywords = {
             "紧张": ["紧张", "焦急", "急切", "焦虑", "不安", "慌张", "急促", "紧迫", "危机"],
-            "轻松": ["轻松", "悠闲", "惬意", "愉快", "欢乐", "开心", "温馨", "平静"],
-            "悲伤": ["悲伤", "难过", "伤心", "悲痛", "失落", "哀伤", "哭泣", "沮丧"],
-            "愤怒": ["愤怒", "生气", "恼怒", "暴怒", "愤慨", "火大", "暴跳如雷"],
-            "惊喜": ["惊喜", "惊讶", "震惊", "意外", "喜出望外", "大吃一惊"],
-            "危险": ["危险", "危机", "凶险", "紧急", "千钧一发", "命悬一线"],
-            "神秘": ["神秘", "诡异", "离奇", "不可思议", "扑朔迷离"],
+            "轻松": ["轻松", "悠闲", "惬意", "愉快", "欢乐", "开心", "温馨", "平静", "淡然"],
+            "悲伤": ["悲伤", "难过", "伤心", "悲痛", "失落", "哀伤", "哭泣", "沮丧", "黯然"],
+            "愤怒": ["愤怒", "生气", "恼怒", "暴怒", "愤慨", "火大", "暴跳如雷", "气愤"],
+            "惊喜": ["惊喜", "惊讶", "震惊", "意外", "喜出望外", "大吃一惊", "愕然"],
+            "危险": ["危险", "危机", "凶险", "紧急", "千钧一发", "命悬一线", "危急"],
+            "神秘": ["神秘", "诡异", "离奇", "不可思议", "扑朔迷离", "费解"],
         }
         
-        # 匹配情绪词
+        # 统计每种情绪的命中次数
+        emotion_counts: dict[str, int] = {}
         for emotion, keywords in emotion_keywords.items():
+            count = 0
             for keyword in keywords:
-                if keyword in content:
-                    return emotion
+                count += content.count(keyword)
+            if count > 0:
+                emotion_counts[emotion] = count
+        
+        # 如果没有匹配到任何情绪，返回 None
+        if not emotion_counts:
+            return None
+        
+        # 返回命中次数最多的情绪
+        max_count = max(emotion_counts.values())
+        # 如果有多个情绪命中次数相同，返回第一个
+        for emotion, count in emotion_counts.items():
+            if count == max_count:
+                return emotion
         
         return None
 
