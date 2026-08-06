@@ -32,6 +32,16 @@ class Config(BaseSettings):
     chapter_min_words: int = 1800
     chapter_max_words: int = 3500
 
+    # === 墨脉图同步（可选，留空则不同步） ===
+    momaitu_base_url: str = "http://127.0.0.1:8080/api"
+    momaitu_username: str = ""
+    momaitu_password: str = ""
+    momaitu_novel_id: str = ""
+
+    def is_momaitu_enabled(self) -> bool:
+        """是否启用墨脉图同步（需要用户名+密码+小说ID）"""
+        return bool(self.momaitu_username and self.momaitu_password and self.momaitu_novel_id)
+
     def resolve_data_dir(self) -> Path:
         """返回 data/ 的绝对路径"""
         path = self.project_dir / self.data_dir

@@ -246,6 +246,14 @@ def write(
     typer.echo(f"   开头: {result.content[:80]}...")
     typer.echo(f"   保存: {filepath}")
 
+    # 同步到墨脉图（可选，未配置则跳过；失败只警告不阻塞）
+    if config.is_momaitu_enabled():
+        try:
+            from moliu.sync.hooks import sync_chapter_artifacts
+            asyncio.run(sync_chapter_artifacts(config, chapter_num, result, qr, emotion, characters))
+        except Exception as e:
+            typer.echo(f"[WARN] 墨脉图同步异常: {e}")
+
 
 @app.command()
 def quickstart(
@@ -370,6 +378,19 @@ def quickstart(
     typer.echo(f"  叙述者: data/narrator.md")
     typer.echo(f"\n下一步: mo write 1 \"第一章的节拍描述\"")
     typer.echo("=" * 50)
+
+    # 同步到墨脉图（可选，未配置则跳过；失败只警告不阻塞）
+    if config.is_momaitu_enabled():
+        try:
+            from moliu.sync.hooks import sync_quickstart_artifacts
+            asyncio.run(sync_quickstart_artifacts(
+                config,
+                world_yaml_path=data_dir / "world" / "world.yaml",
+                characters_dir=data_dir / "characters",
+                narrator_md_path=data_dir / "narrator.md",
+            ))
+        except Exception as e:
+            typer.echo(f"[WARN] 墨脉图同步异常: {e}")
 
 
 @app.command()

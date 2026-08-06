@@ -19,3 +19,4 @@ output/
 # 测试临时文件
 test_output.txt
 .pytest_cache/
+data_test_sync/
