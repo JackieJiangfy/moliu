@@ -23,7 +23,7 @@ class _RetryIfServerError(retry_base):
     """只重试 5xx 和 429；4xx（鉴权/参数错误）不重试"""
 
     def __call__(self, attempt):
-        exc = attempt.exception()
+        exc = attempt.outcome.exception() if hasattr(attempt, 'outcome') else None
         if exc is None:
             return False
         if isinstance(exc, httpx.HTTPStatusError):
