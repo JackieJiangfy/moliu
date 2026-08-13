@@ -10,8 +10,11 @@ __pycache__/
 .idea/
 
 # 项目数据（包含创作内容）
-data/
-output/
+/data/
+/output/
+
+# 但保留 moliu/data/ 下的 Python 源码（如 schemas.py）
+!moliu/data/
 
 # 设计文档（非代码）
 设计文档/

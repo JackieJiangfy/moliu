@@ -102,6 +102,36 @@ def write(
         typer.echo("[ERROR] temperature 必须在 0-2 之间")
         raise typer.Exit(code=1)
 
+    # ========== Gatekeeper 强制信息收集校验 ==========
+    import asyncio
+    from moliu.engines.gatekeeper import Gatekeeper
+
+    gatekeeper = Gatekeeper(config)
+    gk_result = asyncio.run(gatekeeper.check(
+        chapter_num, characters,
+        beat=beat, emotion=emotion,
+        force_check=True,
+    ))
+
+    if not gk_result.passed:
+        typer.echo("")
+        typer.echo(gk_result.summary())
+        typer.echo("")
+        typer.echo("请补充以上缺失信息后重试。")
+        if gk_result.context_hints:
+            for hint in gk_result.context_hints:
+                typer.echo(f"  [提示] {hint}")
+        raise typer.Exit(code=1)
+    else:
+        typer.echo(f"[OK] Gatekeeper 校验通过")
+        if gk_result.warnings:
+            for w in gk_result.warnings:
+                typer.echo(f"  [WARN] {w}")
+        if gk_result.context_hints:
+            typer.echo("")
+            for hint in gk_result.context_hints:
+                typer.echo(f"  [提示] {hint}")
+
     typer.echo(f"=== 第 {chapter_num} 章 ===")
     typer.echo(f"节拍: {beat}")
     typer.echo(f"出场角色: {', '.join(c.name for c in characters)}")
@@ -148,7 +178,7 @@ def write(
 
         # 2. 结构化上下文 (作家思维：大纲+人物表+伏笔+最近稿子)
         assembler = StructuredAssembler(config)
-        ctx = assembler.assemble(
+        ctx = await assembler.assemble(
             chapter_num, beat, characters, world,
             narrator=narrator, narrator_guide="",
             last_emotion=emotion, recent_override=recent,
@@ -527,6 +557,7 @@ def init():
         data_dir / "world",
         data_dir / "characters",
         data_dir / "outlines",
+        data_dir / "volumes",
         data_dir / "notes",
     ]
     for d in dirs:
@@ -564,11 +595,24 @@ state:
         sample_char_path.write_text(sample_char, encoding="utf-8")
         typer.echo(f"  [OK] {sample_char_path.relative_to(config.project_dir)} (示例)")
 
+    # 创建示例卷索引
+    vol_index_path = data_dir / "volumes" / "index.json"
+    if not vol_index_path.exists():
+        from moliu.data.schemas import VolumeIndex, VolumePlan
+        import json
+        sample_index = VolumeIndex(novel_title="")
+        with open(vol_index_path, "w", encoding="utf-8") as f:
+            json.dump(sample_index.model_dump(), f, ensure_ascii=False, indent=2)
+        typer.echo(f"  [OK] {vol_index_path.relative_to(config.project_dir)} (示例)")
+
     typer.echo("\n--- 下一步 ---")
     typer.echo("  1. 设置 MO_DEEPSEEK_API_KEY 环境变量或在 .env 文件中")
     typer.echo("  2. 编辑 data/world/world.yaml")
     typer.echo("  3. 编辑 data/characters/*.yaml")
-    typer.echo('  4. 运行: mo write 1 "主角获得系统，完成第一个任务"')
+    typer.echo("  4. 规划卷结构: mo volume create --name \"卷一名\" --range 1-30")
+    typer.echo("  5. 查看卷: mo volume list")
+    typer.echo('  6. 生成章节: mo write 1 "主角获得系统，完成第一个任务"')
+    typer.echo("  7. 补全元数据: mo backfill 1-50")
     typer.echo("  或使用快速开始: mo quickstart -p \"你的小说描述\"")
 
 
@@ -678,6 +722,265 @@ def usage():
         typer.echo("\n每章用量:")
         for ch in sorted(by_ch):
             typer.echo(f"  第{ch}章: {by_ch[ch]:,}")
+
+
+# ========== 元数据回填 ==========
+
+@app.command()
+def backfill(
+    chapter_range: str = typer.Argument(
+        ..., help="章节范围，如 '1-50' 或 'all'",
+    ),
+    fields: str = typer.Option(
+        "title,emotion,events",
+        "--fields", "-f",
+        help="要回填的字段，逗号分隔: title,emotion,events",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", "-n",
+        help="仅扫描显示缺失情况，不实际调用 LLM",
+    ),
+    concurrency: int = typer.Option(
+        3, "--concurrency", "-c",
+        help="并发数（同时调用 LLM 的章节数）",
+    ),
+):
+    """批量回填章节元数据（标题/情绪/关键事件）
+
+    用法:
+        mo backfill 1-50                    # 回填第1-50章
+        mo backfill 51-125 --fields title   # 仅补标题
+        mo backfill all --dry-run           # 仅查看缺失情况
+    """
+    import asyncio
+    from moliu.engines.backfill import MetadataBackfiller, scan_missing_metadata, print_missing_summary
+
+    config = load_config()
+    output_dir = config.resolve_output_dir()
+
+    # 解析章节范围
+    chapter_range = chapter_range.strip()
+    if chapter_range == "all":
+        existing = sorted(output_dir.glob("第*章"))
+        nums = []
+        for d in existing:
+            try:
+                nums.append(int(d.name.replace("第", "").replace("章", "")))
+            except ValueError:
+                continue
+        if not nums:
+            typer.echo("[!] 没有找到任何章节")
+            raise typer.Exit(code=1)
+        start, end = min(nums), max(nums)
+    elif "-" in chapter_range:
+        parts = chapter_range.split("-")
+        start, end = int(parts[0]), int(parts[1])
+    else:
+        start = end = int(chapter_range)
+
+    # 解析字段
+    field_list = [f.strip() for f in fields.split(",") if f.strip()]
+
+    # 先扫描
+    typer.echo(f"扫描第 {start}-{end} 章元数据...")
+    scan_results = scan_missing_metadata(output_dir)
+    filtered = [r for r in scan_results if start <= r["chapter_num"] <= end]
+    print_missing_summary(filtered)
+
+    if dry_run:
+        return
+
+    # 确认
+    typer.echo("")
+    typer.echo(f"准备回填字段: {', '.join(field_list)}")
+    confirmed = typer.confirm("开始回填?", default=True)
+    if not confirmed:
+        typer.echo("已取消")
+        raise typer.Exit(code=0)
+
+    # 执行回填
+    backfiller = MetadataBackfiller(config)
+
+    def _progress(ch: int, result: dict):
+        if result:
+            fields_done = [k for k in result.keys() if result[k]]
+            typer.echo(f"  [OK] 第{ch}章: {', '.join(fields_done)}")
+        else:
+            typer.echo(f"  [--] 第{ch}章: 无变化或跳过")
+
+    typer.echo(f"\n开始回填（并发: {concurrency}）...")
+    asyncio.run(backfiller.backfill_range(start, end, field_list, concurrency, _progress))
+
+    # 回填后再次扫描
+    typer.echo("\n回填完成，重新扫描确认...")
+    scan_results = scan_missing_metadata(output_dir)
+    filtered = [r for r in scan_results if start <= r["chapter_num"] <= end]
+    print_missing_summary(filtered)
+
+
+# ========== API 服务 ==========
+
+@app.command()
+def serve(
+    host: str = typer.Option("0.0.0.0", "--host", "-h", help="监听地址"),
+    port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
+    reload: bool = typer.Option(False, "--reload", "-r", help="热重载（开发用）"),
+):
+    """启动墨流 API 服务器（FastAPI）
+
+    启动后，OpenWebUI 可通过 http://localhost:8000 访问后端 API。
+    """
+    import uvicorn
+    typer.echo(f"[OK] 启动墨流 API 服务器: http://{host}:{port}")
+    typer.echo(f"  API 文档: http://localhost:{port}/docs")
+    typer.echo(f"  前端页面: http://localhost:{port}/static")
+    if reload:
+        typer.echo("  热重载模式: 开启")
+    uvicorn.run("moliu.api:app", host=host, port=port, reload=reload)
+
+
+# ========== 卷管理 ==========
+
+@app.command()
+def volume(
+    action: str = typer.Argument(
+        ..., help="操作: list / create / update / assign",
+    ),
+    volume_id: int = typer.Option(
+        0, "--id", "-i", help="卷 ID（create 时可选，update/assign 时必填）",
+    ),
+    name: str = typer.Option(
+        "", "--name", "-n", help="卷名称",
+    ),
+    subtitle: str = typer.Option(
+        "", "--subtitle", "-s", help="卷副标题",
+    ),
+    chapter_range: str = typer.Option(
+        "", "--range", "-r", help="章节范围，如 '1-30'",
+    ),
+    summary: str = typer.Option(
+        "", "--summary", "-m", help="卷摘要",
+    ),
+):
+    """卷管理 — 查看、创建、更新卷规划
+
+    用法:
+        mo volume list                          # 查看所有卷
+        mo volume create --name "卷名" --range 1-30  # 创建新卷
+        mo volume update --id 1 --name "新名称"     # 更新卷
+        mo volume assign --id 1 --range 1-30        # 重新分配章节范围
+    """
+    import json
+    from moliu.data.schemas import VolumeIndex, VolumePlan
+
+    config = load_config()
+    data_dir = config.resolve_data_dir()
+    vol_dir = data_dir / "volumes"
+    vol_dir.mkdir(parents=True, exist_ok=True)
+    index_path = vol_dir / "index.json"
+
+    # 加载或创建索引
+    if index_path.exists():
+        vol_index = VolumeIndex.from_json(index_path)
+    else:
+        vol_index = VolumeIndex()
+        vol_index.to_json(index_path)
+
+    if action == "list":
+        if not vol_index.volumes:
+            typer.echo("暂无卷规划。使用 'mo volume create' 创建。")
+        else:
+            typer.echo(f"=== 卷列表 ({vol_index.novel_title or '未命名小说'}) ===")
+            for v in vol_index.volumes:
+                ch_range = f"第{v.chapter_start}-{v.chapter_end}章" if v.chapter_end else "未定义范围"
+                status_icon = "✅" if v.status == "completed" else "📝" if v.status == "active" else "📋"
+                typer.echo(f"  {status_icon} 卷{v.id}: {v.name or '(未命名)'}")
+                typer.echo(f"    范围: {ch_range} | 状态: {v.status}")
+                if v.subtitle:
+                    typer.echo(f"    副标题: {v.subtitle}")
+                if v.summary:
+                    typer.echo(f"    摘要: {v.summary[:60]}...")
+                if v.arcs:
+                    typer.echo(f"    故事弧: {len(v.arcs)} 个")
+                typer.echo("")
+
+    elif action == "create":
+        # 自动生成 ID
+        if volume_id <= 0:
+            volume_id = max((v.id for v in vol_index.volumes), default=0) + 1
+
+        if not name:
+            name = typer.prompt("卷名称")
+        if not chapter_range:
+            chapter_range = typer.prompt("章节范围（如 1-30）")
+        if not summary:
+            summary = typer.prompt("卷摘要（可选）", default="")
+
+        parts = chapter_range.split("-")
+        ch_start = int(parts[0])
+        ch_end = int(parts[1]) if len(parts) > 1 else ch_start
+
+        new_vol = VolumePlan(
+            id=volume_id,
+            name=name,
+            subtitle=subtitle,
+            chapter_start=ch_start,
+            chapter_end=ch_end,
+            summary=summary,
+            status="planned",
+        )
+        vol_index.volumes.append(new_vol)
+        # 按 ID 排序
+        vol_index.volumes.sort(key=lambda v: v.id)
+        vol_index.to_json(index_path)
+        typer.echo(f"[OK] 卷 {volume_id}「{name}」已创建（第{ch_start}-{ch_end}章）")
+
+    elif action == "update":
+        if volume_id <= 0:
+            typer.echo("[!] 请指定卷 ID: --id 1")
+            raise typer.Exit(code=1)
+
+        target = next((v for v in vol_index.volumes if v.id == volume_id), None)
+        if not target:
+            typer.echo(f"[!] 卷 {volume_id} 不存在")
+            raise typer.Exit(code=1)
+
+        if name:
+            target.name = name
+        if subtitle:
+            target.subtitle = subtitle
+        if summary:
+            target.summary = summary
+        if chapter_range:
+            parts = chapter_range.split("-")
+            target.chapter_start = int(parts[0])
+            target.chapter_end = int(parts[1]) if len(parts) > 1 else target.chapter_end
+
+        vol_index.to_json(index_path)
+        typer.echo(f"[OK] 卷 {volume_id} 已更新")
+
+    elif action == "assign":
+        if volume_id <= 0:
+            typer.echo("[!] 请指定卷 ID: --id 1")
+            raise typer.Exit(code=1)
+        if not chapter_range:
+            typer.echo("[!] 请指定章节范围: --range 1-30")
+            raise typer.Exit(code=1)
+
+        target = next((v for v in vol_index.volumes if v.id == volume_id), None)
+        if not target:
+            typer.echo(f"[!] 卷 {volume_id} 不存在")
+            raise typer.Exit(code=1)
+
+        parts = chapter_range.split("-")
+        target.chapter_start = int(parts[0])
+        target.chapter_end = int(parts[1]) if len(parts) > 1 else target.chapter_end
+
+        vol_index.to_json(index_path)
+        typer.echo(f"[OK] 卷 {volume_id} 章节范围已更新为第{target.chapter_start}-{target.chapter_end}章")
+
+    else:
+        typer.echo(f"[!] 未知操作: {action}，支持: list / create / update / assign")
 
 
 if __name__ == "__main__":
