@@ -105,6 +105,7 @@ tailwind.config = {
       <button data-tab="volumes" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600"><span class="text-lg">📖</span><span class="text-sm font-medium">卷宗规划</span></button>
       <button data-tab="chapters" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600"><span class="text-lg">📜</span><span class="text-sm font-medium">章节列表</span></button>
       <button data-tab="settings" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600"><span class="text-lg">🎭</span><span class="text-sm font-medium">世界设定</span></button>
+      <button data-tab="graph" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600"><span class="text-lg">🕸️</span><span class="text-sm font-medium">关系图谱</span></button>
     </nav>
     <div class="p-4 border-t border-ink-200 text-xs text-ink-500">
       <div class="flex items-center gap-2 mb-1"><span id="status-dot" class="w-2 h-2 rounded-full bg-gold-500"></span><span id="status-text">连接中...</span></div>
@@ -185,6 +186,26 @@ tailwind.config = {
         </div>
         <div><h3 class="font-xiaowei text-lg text-ink-900 mb-4 flex items-center gap-2"><span>🎭</span> 角色列表</h3><div id="characters-list" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div></div>
         <div><div class="flex items-center justify-between mb-4"><h3 class="font-xiaowei text-lg text-ink-900 flex items-center gap-2"><span>🪤</span> 伏笔矩阵</h3><button id="new-foreshadow-btn" class="text-xs bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-1 rounded">+ 埋伏笔</button></div><div id="foreshadows-list" class="space-y-2"></div></div>
+      </div>
+    </section>
+
+    <!-- 关系图谱 -->
+    <section id="tab-graph" class="tab-pane flex-1 flex flex-col overflow-hidden hidden">
+      <header class="px-6 py-3 border-b border-ink-200 flex items-center justify-between paper-bg">
+        <div><h2 class="text-base font-bold text-ink-900">关系图谱</h2><p class="text-xs text-ink-500" id="graph-info">角色关系力导向图</p></div>
+        <div class="flex items-center gap-2">
+          <button id="graph-rel-btn" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-2 rounded-md text-sm">关系列表</button>
+          <button id="graph-new-rel-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-2 rounded-md text-sm">+ 新建关系</button>
+          <button id="graph-refresh-btn" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-2 rounded-md text-sm">↻</button>
+        </div>
+      </header>
+      <div class="flex-1 flex overflow-hidden">
+        <!-- 图谱画布 -->
+        <div id="graph-canvas" class="flex-1 relative"></div>
+        <!-- 节点详情侧边栏 -->
+        <div id="graph-detail" class="hidden w-72 border-l border-ink-200 paper-bg p-4 overflow-y-auto scrollbar">
+          <div id="graph-detail-content"></div>
+        </div>
       </div>
     </section>
   </main>
@@ -675,6 +696,7 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
     if (tab === 'volumes') loadVolumes();
     if (tab === 'chapters' && !document.getElementById('chapters-list').dataset.loaded) { document.getElementById('chapters-list').dataset.loaded = '1'; loadChapters(); }
     if (tab === 'settings') loadSettings();
+    if (tab === 'graph') loadGraph();
     // 移动端关闭侧边栏
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('sidebar-overlay').classList.remove('show');
@@ -685,6 +707,208 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
 document.getElementById('open-sidebar').addEventListener('click', function() { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebar-overlay').classList.add('show'); });
 document.getElementById('close-sidebar').addEventListener('click', function() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('show'); });
 document.getElementById('sidebar-overlay').addEventListener('click', function() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('show'); });
+
+// 关系图谱
+let graphChart = null;
+let graphData = null;
+let relTypesCache = [];
+
+async function loadGraph() {
+  const canvas = document.getElementById('graph-canvas');
+  if (!canvas) return;
+  try {
+    // 加载关系类型缓存（首次）
+    if (relTypesCache.length === 0) {
+      relTypesCache = await api('/relationships/types');
+    }
+    const data = await api('/graph');
+    graphData = data;
+    document.getElementById('graph-info').textContent = data.nodes.length + ' 个角色 · ' + data.edges.length + ' 条关系';
+    renderGraph(data);
+  } catch(e) {
+    canvas.innerHTML = '<div class="flex items-center justify-center h-full text-vermilion-600 text-sm">加载失败: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function renderGraph(data) {
+  const canvas = document.getElementById('graph-canvas');
+  if (!canvas || !window.echarts) return;
+  if (graphChart) graphChart.dispose();
+  graphChart = echarts.init(canvas);
+
+  if (data.nodes.length === 0) {
+    canvas.innerHTML = '<div class="flex items-center justify-center h-full text-ink-400 text-sm"><div class="text-center"><div class="text-4xl mb-3">🕸️</div><p>暂无关系数据</p><p class="text-xs mt-1">点击右上角「+ 新建关系」开始</p></div></div>';
+    return;
+  }
+
+  const categoryColors = { positive: '#6b8e4e', neutral: '#8a7960', negative: '#c8453c' };
+  const roleColors = { main: '#c8453c', support: '#ff7d00', villain: '#722ed1', minor: '#86909c', neutral: '#16599e' };
+
+  const nodes = data.nodes.map(function(n) {
+    const size = 30 + Math.min(n.relation_count * 6, 30);
+    return {
+      id: n.id, name: n.name,
+      symbolSize: size,
+      category: n.role_type || 'neutral',
+      itemStyle: { color: roleColors[n.role_type] || '#8a7960', borderColor: '#fff', borderWidth: 2 },
+      label: { show: true, position: 'bottom', fontSize: 12, color: '#261d16' },
+      rawData: n,
+    };
+  });
+
+  const edges = data.edges.map(function(e) {
+    return {
+      source: e.source, target: e.target,
+      label: { show: false, formatter: e.rel_type, fontSize: 10, color: '#564636' },
+      lineStyle: { color: categoryColors[e.category] || '#8a7960', width: 1 + e.intensity / 4, curveness: e.directed ? 0.2 : 0, opacity: 0.7 },
+      symbol: e.directed ? ['none', 'arrow'] : ['none', 'none'],
+      rawData: e,
+    };
+  });
+
+  const categories = Object.keys(roleColors).map(function(k) { return { name: { main: '主角', support: '配角', villain: '反派', minor: '路人', neutral: '中立' }[k] || k }; });
+
+  graphChart.setOption({
+    tooltip: {
+      formatter: function(p) {
+        if (p.dataType === 'node') return '<b>' + p.data.name + '</b><br/>关系数: ' + (p.data.rawData ? p.data.rawData.relation_count : 0);
+        if (p.dataType === 'edge' && p.data.rawData) return '<b>' + p.data.rawData.rel_type + '</b><br/>' + p.data.rawData.source + ' → ' + p.data.rawData.target;
+        return '';
+      }
+    },
+    legend: [{ data: categories.map(function(c) { return c.name; }), orient: 'vertical', right: 10, top: 20, textStyle: { fontSize: 11 } }],
+    series: [{
+      type: 'graph', layout: 'force',
+      data: nodes, links: edges,
+      roam: true, draggable: true,
+      label: { show: true, fontSize: 12, position: 'bottom' },
+      force: { repulsion: 300, edgeLength: [100, 250], gravity: 0.1 },
+      emphasis: { focus: 'adjacency', lineStyle: { width: 4 }, label: { show: true } },
+      lineStyle: { color: '#8a7960', opacity: 0.6, curveness: 0.2 },
+    }]
+  }, true);
+
+  graphChart.off('click');
+  graphChart.on('click', function(params) {
+    if (params.dataType === 'node' && params.data.rawData) {
+      showNodeDetail(params.data.rawData, data);
+    } else if (params.dataType === 'edge' && params.data.rawData) {
+      showEdgeDetail(params.data.rawData);
+    }
+  });
+
+  window.addEventListener('resize', function() { if (graphChart) graphChart.resize(); });
+}
+
+function showNodeDetail(node, data) {
+  const panel = document.getElementById('graph-detail');
+  const content = document.getElementById('graph-detail-content');
+  panel.classList.remove('hidden');
+  // 找该节点的所有关系
+  const rels = data.edges.filter(function(e) { return e.source === node.id || e.target === node.id; });
+  const roleLabel = { main: '主角', support: '配角', villain: '反派', minor: '路人', neutral: '中立' }[node.role_type] || node.role_type || '-';
+  let html = '<div class="flex items-center justify-between mb-3"><h3 class="font-xiaowei text-lg text-ink-900">' + escapeHtml(node.name) + '</h3><button onclick="document.getElementById(\'graph-detail\').classList.add(\'hidden\')" class="text-ink-400 hover:text-vermilion-600">×</button></div>';
+  html += '<div class="text-xs text-ink-500 space-y-1 mb-4 pb-3 border-b border-ink-100"><div>🎭 定位: ' + escapeHtml(roleLabel) + '</div>' + (node.faction ? '<div>🏰 势力: ' + escapeHtml(node.faction) + '</div>' : '') + '<div>🔗 关系数: ' + node.relation_count + '</div></div>';
+  if (rels.length > 0) {
+    html += '<div class="text-xs font-medium text-ink-700 mb-2">关联关系</div><div class="space-y-1">';
+    const catColor = { positive: 'text-bamboo-600 bg-bamboo-500/10', neutral: 'text-ink-600 bg-ink-100', negative: 'text-vermilion-600 bg-vermilion-500/10' };
+    rels.forEach(function(r) {
+      const other = r.source === node.id ? r.target : r.source;
+      html += '<div class="flex items-center gap-2 text-xs p-1.5 hover:bg-ink-50 rounded cursor-pointer" onclick="showEdgeDetail(graphData.edges.find(function(e){return e.id==='+r.id+'}))"><span class="flex-1 text-ink-700">' + escapeHtml(other) + '</span><span class="px-1.5 py-0.5 rounded ' + (catColor[r.category]||catColor.neutral) + '">' + escapeHtml(r.rel_type) + '</span><span class="text-ink-400">' + (r.directed ? '→' : '↔') + '</span></div>';
+    });
+    html += '</div>';
+  }
+  content.innerHTML = html;
+}
+
+function showEdgeDetail(edge) {
+  const panel = document.getElementById('graph-detail');
+  const content = document.getElementById('graph-detail-content');
+  panel.classList.remove('hidden');
+  const catLabel = { positive: '友好', neutral: '中立', negative: '敌对' };
+  const catColor = { positive: 'text-bamboo-600', neutral: 'text-ink-600', negative: 'text-vermilion-600' };
+  content.innerHTML = '<div class="flex items-center justify-between mb-3"><h3 class="font-xiaowei text-lg text-ink-900">关系详情</h3><button onclick="document.getElementById(\'graph-detail\').classList.add(\'hidden\')" class="text-ink-400 hover:text-vermilion-600">×</button></div><div class="text-sm space-y-2"><div class="flex items-center gap-2"><span class="font-medium text-ink-800">' + escapeHtml(edge.source) + '</span><span class="text-ink-400">' + (edge.directed ? '→' : '↔') + '</span><span class="font-medium text-ink-800">' + escapeHtml(edge.target) + '</span></div><div class="text-xs text-ink-500 space-y-1 pt-2 border-t border-ink-100"><div>类型: <span class="text-ink-800">' + escapeHtml(edge.rel_type) + '</span></div><div>性质: <span class="' + (catColor[edge.category]||'') + '">' + (catLabel[edge.category]||edge.category) + '</span></div><div>方向: ' + (edge.directed ? '单向' : '双向') + '</div><div>强度: ' + edge.intensity + '/10</div></div><div class="mt-3"><button onclick="openRelationshipModal(' + edge.id + ')" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-1.5 rounded">编辑</button> <button onclick="confirmDeleteRelationship(' + edge.id + ')" class="text-xs bg-vermilion-100 hover:bg-vermilion-200 text-vermilion-700 px-3 py-1.5 rounded">删除</button></div></div>';
+}
+
+// 关系列表 Modal
+document.getElementById('graph-rel-btn').addEventListener('click', async function() {
+  try {
+    const rels = await api('/relationships');
+    const typesHtml = relTypesCache.map(function(t) { return '<span class="inline-block text-xs bg-ink-100 rounded px-1.5 py-0.5 m-0.5">' + t.icon + ' ' + escapeHtml(t.type_name) + '</span>'; }).join('');
+    let html = '<div class="p-6"><div class="flex items-center justify-between mb-4"><h3 class="font-bold text-lg text-ink-900">关系列表 (' + rels.length + ')</h3><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600">×</button></div>';
+    if (rels.length === 0) {
+      html += '<div class="text-center text-ink-400 py-8">暂无关系<div class="mt-3"><button onclick="closeModal(); openRelationshipModal()" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-1.5 rounded text-sm">+ 新建关系</button></div></div>';
+    } else {
+      const catColor = { positive: 'text-bamboo-600 bg-bamboo-500/10', neutral: 'text-ink-600 bg-ink-100', negative: 'text-vermilion-600 bg-vermilion-500/10' };
+      html += '<div class="space-y-1 max-h-96 overflow-y-auto scrollbar">';
+      rels.forEach(function(r) {
+        html += '<div class="flex items-center gap-2 p-2 hover:bg-ink-50 rounded text-sm"><span class="flex-1"><span class="font-medium text-ink-800">' + escapeHtml(r.source_name) + '</span><span class="text-ink-400 mx-1">' + (r.directed ? '→' : '↔') + '</span><span class="font-medium text-ink-800">' + escapeHtml(r.target_name) + '</span></span><span class="text-xs px-1.5 py-0.5 rounded ' + (catColor[r.category]||catColor.neutral) + '">' + escapeHtml(r.rel_type) + '</span><span class="text-xs text-ink-400">' + r.intensity + '</span><button onclick="openRelationshipModal(' + r.id + ')" class="text-xs text-ink-500 hover:text-vermilion-600 px-1">编</button><button onclick="confirmDeleteRelationship(' + r.id + ')" class="text-xs text-ink-500 hover:text-vermilion-600 px-1">删</button></div>';
+      });
+      html += '</div>';
+    }
+    html += '<div class="mt-4 pt-3 border-t border-ink-100"><div class="text-xs text-ink-500 mb-1">可用关系类型：</div><div>' + typesHtml + '</div></div>';
+    html += '<div class="flex justify-end mt-4"><button onclick="closeModal(); openRelationshipModal()" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded text-sm">+ 新建关系</button></div></div>';
+    showModal(html, true);
+  } catch(e) { toast('加载失败: ' + e.message, 'error'); }
+});
+
+// 新建/编辑关系 Modal
+window.openRelationshipModal = async function(relId) {
+  const isEdit = !!relId;
+  let r = {};
+  if (isEdit) {
+    try {
+      const list = await api('/relationships');
+      r = list.find(function(x) { return x.id === relId; }) || {};
+    } catch(e) {}
+  }
+  // 加载角色名列表
+  let charNames = [];
+  try { const chars = await api('/characters'); charNames = chars.map(function(c) { return c.name; }); } catch(e) {}
+
+  const typeOptions = relTypesCache.map(function(t) { return '<option value="' + escapeHtml(t.type_name) + '" data-cat="' + t.category + '" data-dir="' + (t.directed ? '1' : '0') + '"' + (r.rel_type === t.type_name ? ' selected' : '') + '>' + t.icon + ' ' + escapeHtml(t.type_name) + ' (' + {positive:'友好',neutral:'中立',negative:'敌对'}[t.category] + ')</option>'; }).join('');
+
+  showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-4">' + (isEdit ? '编辑关系' : '新建关系') + '</h3><div class="space-y-4"><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">源角色 *</label><select id="rel-source" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white">' + charNames.map(function(n) { return '<option value="' + escapeHtml(n) + '"' + (r.source_name === n ? ' selected' : '') + '>' + escapeHtml(n) + '</option>'; }).join('') + '</select></div><div><label class="text-xs text-ink-500 block mb-1">目标角色 *</label><select id="rel-target" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white">' + charNames.map(function(n) { return '<option value="' + escapeHtml(n) + '"' + (r.target_name === n ? ' selected' : '') + '>' + escapeHtml(n) + '</option>'; }).join('') + '</select></div></div><div><label class="text-xs text-ink-500 block mb-1">关系类型</label><select id="rel-type" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white">' + typeOptions + '</select></div><div class="grid grid-cols-3 gap-3"><div><label class="text-xs text-ink-500 block mb-1">性质</label><select id="rel-cat" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="positive"' + (r.category === 'positive' ? ' selected' : '') + '>友好</option><option value="neutral"' + (r.category === 'neutral' ? ' selected' : '') + '>中立</option><option value="negative"' + (r.category === 'negative' ? ' selected' : '') + '>敌对</option></select></div><div><label class="text-xs text-ink-500 block mb-1">方向</label><select id="rel-dir" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="0"' + (!r.directed ? ' selected' : '') + '>双向</option><option value="1"' + (r.directed ? ' selected' : '') + '>单向</option></select></div><div><label class="text-xs text-ink-500 block mb-1">强度 (1-10)</label><input id="rel-int" type="number" min="1" max="10" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="' + (r.intensity || 5) + '"></div></div><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">起始章</label><input id="rel-start" type="number" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="' + (r.start_chapter || 0) + '"></div><div><label class="text-xs text-ink-500 block mb-1">结束章</label><input id="rel-end" type="number" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="' + (r.end_chapter || 0) + '"></div></div><div><label class="text-xs text-ink-500 block mb-1">描述</label><input id="rel-desc" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="' + escapeHtml(r.description || '') + '"></div></div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-rel-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">' + (isEdit ? '保存' : '创建') + '</button></div></div>', true);
+
+  // 关系类型变化时自动更新性质和方向
+  document.getElementById('rel-type').addEventListener('change', function() {
+    const opt = this.options[this.selectedIndex];
+    document.getElementById('rel-cat').value = opt.dataset.cat;
+    document.getElementById('rel-dir').value = opt.dataset.dir;
+  });
+
+  document.getElementById('save-rel-btn').addEventListener('click', async function() {
+    const body = {
+      source_name: document.getElementById('rel-source').value,
+      target_name: document.getElementById('rel-target').value,
+      rel_type: document.getElementById('rel-type').value,
+      category: document.getElementById('rel-cat').value,
+      directed: document.getElementById('rel-dir').value === '1',
+      intensity: parseInt(document.getElementById('rel-int').value) || 5,
+      start_chapter: parseInt(document.getElementById('rel-start').value) || 0,
+      end_chapter: parseInt(document.getElementById('rel-end').value) || 0,
+      description: document.getElementById('rel-desc').value,
+    };
+    if (!body.source_name || !body.target_name) { toast('请选择源角色和目标角色', 'warn'); return; }
+    if (body.source_name === body.target_name) { toast('源角色和目标角色不能相同', 'warn'); return; }
+    try {
+      if (isEdit) { await api('/relationships/' + relId, { method: 'PUT', body: JSON.stringify(body) }); toast('关系已更新', 'success'); }
+      else { await api('/relationships', { method: 'POST', body: JSON.stringify(body) }); toast('关系已创建', 'success'); }
+      closeModal();
+      loadGraph();
+    } catch(e) { toast('保存失败: ' + e.message, 'error'); }
+  });
+};
+
+window.confirmDeleteRelationship = async function(id) {
+  const ok = await confirmDialog('删除关系', '确认删除该关系？');
+  if (!ok) return;
+  try { await api('/relationships/' + id, { method: 'DELETE' }); toast('已删除', 'success'); closeModal(); document.getElementById('graph-detail').classList.add('hidden'); loadGraph(); }
+  catch(e) { toast('删除失败: ' + e.message, 'error'); }
+};
+
+document.getElementById('graph-new-rel-btn').addEventListener('click', function() { openRelationshipModal(); });
+document.getElementById('graph-refresh-btn').addEventListener('click', function() { loadGraph(); toast('已刷新', 'info', 1000); });
 
 // 智能生成 Modal
 window.openGenerateModal = function() {
