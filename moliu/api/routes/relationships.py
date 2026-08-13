@@ -6,13 +6,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter()
+
+# 文件读写锁 — 防止并发请求导致读改写丢数据
+_rel_lock = asyncio.Lock()
 
 
 # --- 25 种预设关系类型 ---
@@ -70,7 +75,7 @@ class RelationshipCreate(BaseModel):
     source_name: str
     target_name: str
     rel_type: str
-    category: str = "neutral"
+    category: str | None = None     # None 表示未选，由预设类型补全；显式传值则尊重用户选择
     directed: bool = False
     intensity: int = 5
     description: str = ""
@@ -143,15 +148,18 @@ def _load_characters_map(data_dir: Path) -> dict[str, dict]:
     chars_dir = data_dir / "characters"
     if not chars_dir.exists():
         return {}
-    import yaml
     result = {}
     for f in chars_dir.glob("*.yaml"):
         try:
             data = yaml.safe_load(f.read_text(encoding="utf-8"))
             if isinstance(data, dict) and data.get("name"):
                 name = data["name"]
+                state = data.get("state")
+                faction = data.get("faction") or (
+                    state.get("location", "") if isinstance(state, dict) else ""
+                )
                 result[name] = {
-                    "faction": data.get("faction", "") or data.get("state", {}).get("location", "") if isinstance(data.get("state"), dict) else "",
+                    "faction": faction,
                     "role_type": data.get("role_type", ""),
                 }
         except Exception:
@@ -173,33 +181,35 @@ async def list_relationships(request: Request):
 async def create_relationship(request: Request, body: RelationshipCreate):
     """新建关系"""
     cfg = request.app.state.config
-    items = _get_relationships(cfg.resolve_data_dir())
+    async with _rel_lock:
+        items = _get_relationships(cfg.resolve_data_dir())
 
-    # 查预设类型，自动补 category 和 directed
-    preset = next((p for p in PRESET_REL_TYPES if p["type_name"] == body.rel_type), None)
-    category = body.category
-    directed = body.directed
-    if preset:
-        if not category or category == "neutral":
-            category = preset.get("category", "neutral")
-        if not directed and preset.get("directed"):
-            directed = True
+        # 查预设类型，自动补 category 和 directed
+        preset = next((p for p in PRESET_REL_TYPES if p["type_name"] == body.rel_type), None)
+        category = body.category
+        directed = body.directed
+        if preset:
+            # 只在用户未显式指定（None）时用预设补全，避免覆盖用户明确选的 neutral
+            if category is None:
+                category = preset.get("category", "neutral")
+            if not directed and preset.get("directed"):
+                directed = True
 
-    new_id = max((e.get("id", 0) for e in items), default=0) + 1
-    new_item = {
-        "id": new_id,
-        "source_name": body.source_name,
-        "target_name": body.target_name,
-        "rel_type": body.rel_type,
-        "category": category,
-        "directed": directed,
-        "intensity": body.intensity,
-        "description": body.description,
-        "start_chapter": body.start_chapter,
-        "end_chapter": body.end_chapter,
-    }
-    items.append(new_item)
-    _save_relationships(cfg.resolve_data_dir(), items)
+        new_id = max((e.get("id", 0) for e in items), default=0) + 1
+        new_item = {
+            "id": new_id,
+            "source_name": body.source_name,
+            "target_name": body.target_name,
+            "rel_type": body.rel_type,
+            "category": category or "neutral",
+            "directed": directed,
+            "intensity": body.intensity,
+            "description": body.description,
+            "start_chapter": body.start_chapter,
+            "end_chapter": body.end_chapter,
+        }
+        items.append(new_item)
+        _save_relationships(cfg.resolve_data_dir(), items)
     return RelationshipItem(**new_item)
 
 
@@ -207,38 +217,40 @@ async def create_relationship(request: Request, body: RelationshipCreate):
 async def update_relationship(request: Request, rel_id: int, body: RelationshipUpdate):
     """更新关系"""
     cfg = request.app.state.config
-    items = _get_relationships(cfg.resolve_data_dir())
+    async with _rel_lock:
+        items = _get_relationships(cfg.resolve_data_dir())
 
-    for e in items:
-        if e.get("id") == rel_id:
-            if body.source_name is not None: e["source_name"] = body.source_name
-            if body.target_name is not None: e["target_name"] = body.target_name
-            if body.rel_type is not None: e["rel_type"] = body.rel_type
-            if body.category is not None: e["category"] = body.category
-            if body.directed is not None: e["directed"] = body.directed
-            if body.intensity is not None: e["intensity"] = body.intensity
-            if body.description is not None: e["description"] = body.description
-            if body.start_chapter is not None: e["start_chapter"] = body.start_chapter
-            if body.end_chapter is not None: e["end_chapter"] = body.end_chapter
-            _save_relationships(cfg.resolve_data_dir(), items)
-            return RelationshipItem(**e)
+        for e in items:
+            if e.get("id") == rel_id:
+                if body.source_name is not None: e["source_name"] = body.source_name
+                if body.target_name is not None: e["target_name"] = body.target_name
+                if body.rel_type is not None: e["rel_type"] = body.rel_type
+                if body.category is not None: e["category"] = body.category
+                if body.directed is not None: e["directed"] = body.directed
+                if body.intensity is not None: e["intensity"] = body.intensity
+                if body.description is not None: e["description"] = body.description
+                if body.start_chapter is not None: e["start_chapter"] = body.start_chapter
+                if body.end_chapter is not None: e["end_chapter"] = body.end_chapter
+                _save_relationships(cfg.resolve_data_dir(), items)
+                return RelationshipItem(**e)
 
-    raise HTTPException(status_code=404, detail=f"关系 {rel_id} 不存在")
+        raise HTTPException(status_code=404, detail=f"关系 {rel_id} 不存在")
 
 
 @router.delete("/relationships/{rel_id}", status_code=204)
 async def delete_relationship(request: Request, rel_id: int):
     """删除关系"""
     cfg = request.app.state.config
-    items = _get_relationships(cfg.resolve_data_dir())
+    async with _rel_lock:
+        items = _get_relationships(cfg.resolve_data_dir())
 
-    for i, e in enumerate(items):
-        if e.get("id") == rel_id:
-            items.pop(i)
-            _save_relationships(cfg.resolve_data_dir(), items)
-            return
+        for i, e in enumerate(items):
+            if e.get("id") == rel_id:
+                items.pop(i)
+                _save_relationships(cfg.resolve_data_dir(), items)
+                return
 
-    raise HTTPException(status_code=404, detail=f"关系 {rel_id} 不存在")
+        raise HTTPException(status_code=404, detail=f"关系 {rel_id} 不存在")
 
 
 @router.get("/relationships/types", response_model=list[RelTypeItem])
@@ -273,11 +285,11 @@ async def get_graph(request: Request):
         rel_count[rel["source_name"]] = rel_count.get(rel["source_name"], 0) + 1
         rel_count[rel["target_name"]] = rel_count.get(rel["target_name"], 0) + 1
 
-    # 构建节点（关系中出现过的角色）
-    node_names: set[str] = set()
-    for rel in relationships:
-        node_names.add(rel["source_name"])
-        node_names.add(rel["target_name"])
+    # 构建节点（关系中出现过的角色，按首次出现顺序保序，再按关联数降序排）
+    node_names = list(dict.fromkeys(
+        [rel["source_name"] for rel in relationships] + [rel["target_name"] for rel in relationships]
+    ))
+    node_names.sort(key=lambda n: rel_count.get(n, 0), reverse=True)
 
     nodes = []
     for name in node_names:

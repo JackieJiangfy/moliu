@@ -823,19 +823,24 @@ function renderGraph(data) {
   // 拖拽后自动保存位置
   graphChart.off('mouseup');
   graphChart.on('mouseup', { dataType: 'node' }, function(params) {
-    const positions = getSavedPositions();
-    // ECharts 力导向布局拖拽后，位置在内部数据里
     const opt = graphChart.getOption();
     const seriesData = opt.series[0].data;
+    const positions = {};
+    let count = 0;
     seriesData.forEach(function(n) {
-      if (n.name && n.x !== undefined) {
+      if (n.name && n.x !== undefined && n.x !== null) {
         positions[n.name] = { x: n.x, y: n.y };
+        count++;
       }
     });
-    savePositions(positions);
+    // 只有真的拿到位置才保存，避免力导向运动中静默写入空对象
+    if (count > 0) savePositions(positions);
   });
 
-  window.addEventListener('resize', function() { if (graphChart) graphChart.resize(); });
+  // resize 监听器只注册一次
+  if (_graphResizeHandler) window.removeEventListener('resize', _graphResizeHandler);
+  _graphResizeHandler = function() { if (graphChart) graphChart.resize(); };
+  window.addEventListener('resize', _graphResizeHandler);
 }
 
 function showNodeDetail(node, data) {
@@ -848,15 +853,26 @@ function showNodeDetail(node, data) {
   let html = '<div class="flex items-center justify-between mb-3"><h3 class="font-xiaowei text-lg text-ink-900">' + escapeHtml(node.name) + '</h3><button onclick="document.getElementById(\'graph-detail\').classList.add(\'hidden\')" class="text-ink-400 hover:text-vermilion-600">×</button></div>';
   html += '<div class="text-xs text-ink-500 space-y-1 mb-4 pb-3 border-b border-ink-100"><div>🎭 定位: ' + escapeHtml(roleLabel) + '</div>' + (node.faction ? '<div>🏰 势力: ' + escapeHtml(node.faction) + '</div>' : '') + '<div>🔗 关系数: ' + node.relation_count + '</div></div>';
   if (rels.length > 0) {
-    html += '<div class="text-xs font-medium text-ink-700 mb-2">关联关系</div><div class="space-y-1">';
+    html += '<div class="text-xs font-medium text-ink-700 mb-2">关联关系</div><div class="space-y-1" id="graph-rel-list">';
     const catColor = { positive: 'text-bamboo-600 bg-bamboo-500/10', neutral: 'text-ink-600 bg-ink-100', negative: 'text-vermilion-600 bg-vermilion-500/10' };
     rels.forEach(function(r) {
       const other = r.source === node.id ? r.target : r.source;
-      html += '<div class="flex items-center gap-2 text-xs p-1.5 hover:bg-ink-50 rounded cursor-pointer" onclick="showEdgeDetail(graphData.edges.find(function(e){return e.id==='+r.id+'}))"><span class="flex-1 text-ink-700">' + escapeHtml(other) + '</span><span class="px-1.5 py-0.5 rounded ' + (catColor[r.category]||catColor.neutral) + '">' + escapeHtml(r.rel_type) + '</span><span class="text-ink-400">' + (r.directed ? '→' : '↔') + '</span></div>';
+      html += '<div class="flex items-center gap-2 text-xs p-1.5 hover:bg-ink-50 rounded cursor-pointer" data-edge-id="' + r.id + '"><span class="flex-1 text-ink-700">' + escapeHtml(other) + '</span><span class="px-1.5 py-0.5 rounded ' + (catColor[r.category]||catColor.neutral) + '">' + escapeHtml(r.rel_type) + '</span><span class="text-ink-400">' + (r.directed ? '→' : '↔') + '</span></div>';
     });
     html += '</div>';
   }
   content.innerHTML = html;
+  // 事件委托：点击关联关系项
+  const relList = document.getElementById('graph-rel-list');
+  if (relList) {
+    relList.addEventListener('click', function(e) {
+      const item = e.target.closest('[data-edge-id]');
+      if (!item) return;
+      const id = item.dataset.edgeId;
+      const edge = graphData.edges.find(function(e) { return String(e.id) === id; });
+      if (edge) showEdgeDetail(edge);
+    });
+  }
 }
 
 function showEdgeDetail(edge) {
@@ -865,7 +881,16 @@ function showEdgeDetail(edge) {
   panel.classList.remove('hidden');
   const catLabel = { positive: '友好', neutral: '中立', negative: '敌对' };
   const catColor = { positive: 'text-bamboo-600', neutral: 'text-ink-600', negative: 'text-vermilion-600' };
-  content.innerHTML = '<div class="flex items-center justify-between mb-3"><h3 class="font-xiaowei text-lg text-ink-900">关系详情</h3><button onclick="document.getElementById(\'graph-detail\').classList.add(\'hidden\')" class="text-ink-400 hover:text-vermilion-600">×</button></div><div class="text-sm space-y-2"><div class="flex items-center gap-2"><span class="font-medium text-ink-800">' + escapeHtml(edge.source) + '</span><span class="text-ink-400">' + (edge.directed ? '→' : '↔') + '</span><span class="font-medium text-ink-800">' + escapeHtml(edge.target) + '</span></div><div class="text-xs text-ink-500 space-y-1 pt-2 border-t border-ink-100"><div>类型: <span class="text-ink-800">' + escapeHtml(edge.rel_type) + '</span></div><div>性质: <span class="' + (catColor[edge.category]||'') + '">' + (catLabel[edge.category]||edge.category) + '</span></div><div>方向: ' + (edge.directed ? '单向' : '双向') + '</div><div>强度: ' + edge.intensity + '/10</div></div><div class="mt-3"><button onclick="openRelationshipModal(' + edge.id + ')" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-1.5 rounded">编辑</button> <button onclick="confirmDeleteRelationship(' + edge.id + ')" class="text-xs bg-vermilion-100 hover:bg-vermilion-200 text-vermilion-700 px-3 py-1.5 rounded">删除</button></div></div>';
+  content.innerHTML = '<div class="flex items-center justify-between mb-3"><h3 class="font-xiaowei text-lg text-ink-900">关系详情</h3><button id="graph-detail-close" class="text-ink-400 hover:text-vermilion-600">×</button></div><div class="text-sm space-y-2"><div class="flex items-center gap-2"><span class="font-medium text-ink-800">' + escapeHtml(edge.source) + '</span><span class="text-ink-400">' + (edge.directed ? '→' : '↔') + '</span><span class="font-medium text-ink-800">' + escapeHtml(edge.target) + '</span></div><div class="text-xs text-ink-500 space-y-1 pt-2 border-t border-ink-100"><div>类型: <span class="text-ink-800">' + escapeHtml(edge.rel_type) + '</span></div><div>性质: <span class="' + (catColor[edge.category]||'') + '">' + (catLabel[edge.category]||edge.category) + '</span></div><div>方向: ' + (edge.directed ? '单向' : '双向') + '</div><div>强度: ' + edge.intensity + '/10</div></div><div class="mt-3" id="graph-edge-actions" data-edge-id="' + edge.id + '"><button data-action="edit" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-1.5 rounded">编辑</button> <button data-action="delete" class="text-xs bg-vermilion-100 hover:bg-vermilion-200 text-vermilion-700 px-3 py-1.5 rounded">删除</button></div></div>';
+  // 事件委托
+  document.getElementById('graph-detail-close').addEventListener('click', function() { panel.classList.add('hidden'); });
+  document.getElementById('graph-edge-actions').addEventListener('click', function(e) {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    const id = parseInt(this.dataset.edgeId, 10);
+    if (btn.dataset.action === 'edit') openRelationshipModal(id);
+    else if (btn.dataset.action === 'delete') confirmDeleteRelationship(id);
+  });
 }
 
 // 关系列表 Modal
@@ -878,15 +903,30 @@ document.getElementById('graph-rel-btn').addEventListener('click', async functio
       html += '<div class="text-center text-ink-400 py-8">暂无关系<div class="mt-3"><button onclick="closeModal(); openRelationshipModal()" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-1.5 rounded text-sm">+ 新建关系</button></div></div>';
     } else {
       const catColor = { positive: 'text-bamboo-600 bg-bamboo-500/10', neutral: 'text-ink-600 bg-ink-100', negative: 'text-vermilion-600 bg-vermilion-500/10' };
-      html += '<div class="space-y-1 max-h-96 overflow-y-auto scrollbar">';
+      html += '<div class="space-y-1 max-h-96 overflow-y-auto scrollbar" id="rel-list-container">';
       rels.forEach(function(r) {
-        html += '<div class="flex items-center gap-2 p-2 hover:bg-ink-50 rounded text-sm"><span class="flex-1"><span class="font-medium text-ink-800">' + escapeHtml(r.source_name) + '</span><span class="text-ink-400 mx-1">' + (r.directed ? '→' : '↔') + '</span><span class="font-medium text-ink-800">' + escapeHtml(r.target_name) + '</span></span><span class="text-xs px-1.5 py-0.5 rounded ' + (catColor[r.category]||catColor.neutral) + '">' + escapeHtml(r.rel_type) + '</span><span class="text-xs text-ink-400">' + r.intensity + '</span><button onclick="openRelationshipModal(' + r.id + ')" class="text-xs text-ink-500 hover:text-vermilion-600 px-1">编</button><button onclick="confirmDeleteRelationship(' + r.id + ')" class="text-xs text-ink-500 hover:text-vermilion-600 px-1">删</button></div>';
+        html += '<div class="flex items-center gap-2 p-2 hover:bg-ink-50 rounded text-sm" data-rel-id="' + r.id + '"><span class="flex-1"><span class="font-medium text-ink-800">' + escapeHtml(r.source_name) + '</span><span class="text-ink-400 mx-1">' + (r.directed ? '→' : '↔') + '</span><span class="font-medium text-ink-800">' + escapeHtml(r.target_name) + '</span></span><span class="text-xs px-1.5 py-0.5 rounded ' + (catColor[r.category]||catColor.neutral) + '">' + escapeHtml(r.rel_type) + '</span><span class="text-xs text-ink-400">' + r.intensity + '</span><button data-action="edit" class="text-xs text-ink-500 hover:text-vermilion-600 px-1">编</button><button data-action="delete" class="text-xs text-ink-500 hover:text-vermilion-600 px-1">删</button></div>';
       });
       html += '</div>';
     }
     html += '<div class="mt-4 pt-3 border-t border-ink-100"><div class="text-xs text-ink-500 mb-1">可用关系类型：</div><div>' + typesHtml + '</div></div>';
-    html += '<div class="flex justify-end mt-4"><button onclick="closeModal(); openRelationshipModal()" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded text-sm">+ 新建关系</button></div></div>';
+    html += '<div class="flex justify-end mt-4"><button id="rel-list-new-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded text-sm">+ 新建关系</button></div></div>';
     showModal(html, true);
+    // 事件委托
+    const listContainer = document.getElementById('rel-list-container');
+    if (listContainer) {
+      listContainer.addEventListener('click', function(e) {
+        const btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        const row = btn.closest('[data-rel-id]');
+        if (!row) return;
+        const id = parseInt(row.dataset.relId, 10);
+        if (btn.dataset.action === 'edit') { closeModal(); openRelationshipModal(id); }
+        else if (btn.dataset.action === 'delete') { confirmDeleteRelationship(id); }
+      });
+    }
+    const newBtn = document.getElementById('rel-list-new-btn');
+    if (newBtn) newBtn.addEventListener('click', function() { closeModal(); openRelationshipModal(); });
   } catch(e) { toast('加载失败: ' + e.message, 'error'); }
 });
 
