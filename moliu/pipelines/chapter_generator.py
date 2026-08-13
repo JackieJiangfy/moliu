@@ -93,21 +93,54 @@ class Pipeline(BasePipeline):
                             lines.append(f"- ⚠ {w}")
                     return "\n".join(lines)
 
-                # 预检通过，给出生成命令
+                # 预检通过，直接调用生成 API
                 hints = check.get("context_hints", [])
-                cmd = f"mo write {chapter_num} \"{beat}\" --emotion {emotion}"
-                result = [
-                    f"## ✅ 预检通过！\n",
+                header = [
+                    f"## ✅ 预检通过，开始生成...\n",
                     f"**章节**: 第 {chapter_num} 章",
                     f"**节拍**: {beat}",
-                    f"**情绪**: {emotion}",
+                    f"**情绪**: {emotion}\n",
                 ]
                 if hints:
-                    result.append("\n**提示：**")
+                    header.append("**提示：**")
                     for h in hints:
-                        result.append(f"- 💡 {h}")
-                result.append(f"\n请在终端运行以下命令生成：\n\n```bash\n{cmd}\n```")
-                return "\n".join(result)
+                        header.append(f"- 💡 {h}")
+                    header.append("")
+
+                try:
+                    gen_payload = {
+                        "chapter_num": chapter_num,
+                        "beat": beat,
+                        "emotion": emotion,
+                    }
+                    r2 = await client.post(
+                        f"{self.moliu_api_url}/api/v1/generate",
+                        json=gen_payload,
+                        timeout=300,
+                    )
+                    if r2.status_code == 200:
+                        gen = r2.json()
+                        lines = list(header)
+                        lines.append(f"\n## ✅ 生成完成！\n")
+                        lines.append(f"**字数**: {gen.get('word_count', 0)}")
+                        lines.append(f"**Token**: {gen.get('tokens_used', 0)}")
+                        lines.append(f"**保存**: `{gen.get('filepath', '')}`\n")
+                        lines.append("**预览：**\n")
+                        lines.append(f"```\n{gen.get('content_preview', '')}...\n```")
+                        if gen.get("quality_report"):
+                            lines.append(f"\n**质检报告：**\n```\n{gen['quality_report']}\n```")
+                        return "\n".join(lines)
+                    elif r2.status_code == 422:
+                        detail = r2.json().get("detail", {})
+                        lines = list(header)
+                        lines.append("## ❌ 生成被拒绝\n")
+                        for item in detail.get("missing_items", []):
+                            lines.append(f"- {item}")
+                        return "\n".join(lines)
+                    else:
+                        return f"## ❌ 生成失败 (HTTP {r2.status_code})\n\n{r2.text[:300]}"
+                except httpx.RequestError as e:
+                    return f"## ❌ 生成请求失败\n\n错误: {e}"
 
         except httpx.RequestError as e:
             return f"## ❌ 无法连接到墨流后端\n\n请确认后端已启动：`mo serve`\n\n错误: {e}"

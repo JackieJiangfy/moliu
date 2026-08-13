@@ -14,7 +14,9 @@ import typer
 import yaml
 
 from moliu.config import Config
+from moliu.engines.gateway import DeepSeekGateway
 from moliu.sync.client import MomaituSyncClient, MomaituSyncError
+from moliu.sync.relation_extractor import RelationExtractor
 
 if TYPE_CHECKING:
     from moliu.data.schemas import (
@@ -109,7 +111,7 @@ async def sync_chapter_artifacts(
     emotion: str,
     characters: list["CharacterCard"],
 ) -> None:
-    """write 命令完成后同步章节 + 角色最新状态"""
+    """write 命令完成后同步章节 + 角色最新状态 + 关系抽取"""
     if not config.is_momaitu_enabled():
         return
 
@@ -148,6 +150,32 @@ async def sync_chapter_artifacts(
     except MomaituSyncError as e:
         typer.echo(f"  [FAIL] 第 {chapter_num} 章: {e}")
         fail += 1
+
+    # 3. 关系抽取（角色数 >=2 时用 LLM 从章节正文抽取关系并同步）
+    if len(characters) >= 2 and config.deepseek_api_key:
+        gw = None
+        try:
+            typer.echo("  关系抽取中...", nl=False)
+            gw = DeepSeekGateway(config)
+            extractor = RelationExtractor(config, gw)
+            relations = await extractor.extract(chapter_num, result.content, characters)
+            if relations:
+                sync_result = await client.sync_relationships(novel_id, relations)
+                typer.echo(
+                    f"\r  [OK] 关系抽取: {len(relations)} 条 → "
+                    f"成功 {sync_result.get('success', 0)} / 跳过 {sync_result.get('skipped', 0)}"
+                )
+                ok += 1
+            else:
+                typer.echo("\r  [SKIP] 关系抽取: 无关系")
+        except MomaituSyncError as e:
+            typer.echo(f"\r  [FAIL] 关系同步: {e}")
+            fail += 1
+        except Exception as e:
+            typer.echo(f"\r  [WARN] 关系抽取异常: {e}")
+        finally:
+            if gw is not None:
+                await gw.close()
 
     await client.close()
     typer.echo(f"=== 同步完成: {ok} 成功 / {fail} 失败 ===")

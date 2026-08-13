@@ -63,10 +63,27 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 @media (max-width: 640px) {
   .form-row { grid-template-columns: 1fr; }
 }
+
+/* 统一导航栏 */
+.navbar { display: flex; align-items: center; gap: 0; background: #fff; border-bottom: 1px solid #e0e0e0; padding: 0 24px; height: 48px; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+.navbar-brand { font-size: 15px; font-weight: 600; color: #1a1a1a; margin-right: 24px; text-decoration: none; }
+.navbar-nav { display: flex; gap: 0; list-style: none; }
+.navbar-nav a { padding: 6px 14px; font-size: 13px; color: #6b7280; text-decoration: none; border-radius: 6px; transition: all .15s; }
+.navbar-nav a:hover { background: #f3f4f6; color: #1a1a1a; }
+.navbar-nav a.active { background: #3b82f611; color: #3b82f6; font-weight: 500; }
 </style>
 </head>
 <body>
 <div id="app">
+  <nav class="navbar">
+    <a class="navbar-brand" href="/static/dashboard.html">墨流</a>
+    <ul class="navbar-nav">
+      <li><a href="/static/dashboard.html">故事看板</a></li>
+      <li><a href="/static/volumes.html">卷规划</a></li>
+      <li><a href="/static/generator.html" class="active">生成章节</a></li>
+      <li><a href="/docs">API 文档</a></li>
+    </ul>
+  </nav>
   <div class="container">
     <div class="header">
       <h1>✏️ 生成章节</h1>

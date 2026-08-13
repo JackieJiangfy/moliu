@@ -1,4 +1,4 @@
-"""结构化上下文组装 — 作家思维：大纲 + 人物表 + 伏笔 + 最近稿子"""
+"""结构化上下文组装 — 作家思维：大纲 + 人物表 + 伏笔 + 图谱 + 最近稿子"""
 
 from __future__ import annotations
 
@@ -29,8 +29,9 @@ class StructuredContext:
     banned_phrases: list[str] = field(default_factory=list)
     arc_direction: str = ""
     character_snapshots: str = ""
+    graph_insights: str = ""        # 图谱反向注入的智能提示
     due_foreshadows: str = ""
-    constraints: str = ""           # 硬约束："本章不该做的事"
+    constraints: str = ""
     recent_chapters_full: str = ""
     last_emotion: str = "轻松"
     last_300_words: str = ""
@@ -40,6 +41,7 @@ class StructuredContext:
         sections = [
             ("arc_direction", "【当前故事方向】"),
             ("character_snapshots", "【出场角色当前状态】"),
+            ("graph_insights", "【图谱智能提示】"),
             ("constraints", "【本章约束：不可出现】"),
             ("due_foreshadows", "【本章可能需要回收的伏笔】"),
             ("recent_chapters_full", "【前文章节原文】"),
@@ -73,7 +75,7 @@ class StructuredAssembler:
     def _invalidate_cache(self) -> None:
         self._cache.clear()
 
-    def assemble(
+    async def assemble(
         self,
         chapter_num: int,
         beat: str,
@@ -106,6 +108,9 @@ class StructuredAssembler:
             ctx.recent_chapters_full = self._load_recent_full(chapter_num)
 
         ctx.last_300_words = self._load_last_300_words(chapter_num)
+
+        # 图谱反向注入（墨脉图）
+        ctx.graph_insights = await self.inject_graph_context(chapter_num, characters)
 
         return ctx
 
@@ -310,6 +315,84 @@ class StructuredAssembler:
                 if loaded > MAX_RECENT_WORDS:
                     break
         return "\n\n".join(parts)
+
+    async def inject_graph_context(self, chapter_num: int, characters: list[CharacterCard]) -> str:
+        """从墨脉图图谱拉取关系数据，生成可指导写作的上下文"""
+        config = self.config
+        if not config.is_momaitu_enabled():
+            raise RuntimeError("图谱未启用——请在 .env 中配置 MO_MOMAITU_* 并启动墨脉图后端")
+
+        try:
+            from moliu.sync.client import MomaituSyncClient
+            client = MomaituSyncClient(
+                base_url=config.momaitu_base_url,
+                username=config.momaitu_username,
+                password=config.momaitu_password,
+            )
+            novel_id = config.momaitu_novel_id
+
+            graph_chars = await client.get_characters(novel_id)
+            graph_foreshadows = await client.get_foreshadows(novel_id)
+
+            parts = []
+            char_names = {c.name for c in characters}
+
+            # 1. 角色出场间隔告警
+            long_absent = []
+            rarely_seen = []
+            all_chars_absent = []
+            for gc in graph_chars:
+                name = gc.get("name", "")
+                last_ch = int(gc.get("lastChapterAppeared", 0) or 0)
+                gap = chapter_num - last_ch if last_ch > 0 else chapter_num
+                status = gc.get("status", "")
+                if status in ("dead", "left", "dropped"):
+                    continue
+                if name in char_names and gap > 5:
+                    long_absent.append(f"[{name}] 已 {gap} 章没出现了——读者可能忘了 Ta 在干嘛")
+                elif name not in char_names:
+                    all_chars_absent.append(name)
+                elif gap > 15:
+                    rarely_seen.append(f"[{name}] 虽然本章未出场，但已 {gap} 章没被提及——考虑本章随口提一句")
+
+            if long_absent:
+                parts.append("【角色回归提醒】以下角色本章出场但已离开读者视野较久:\n" + "\n".join(long_absent))
+            if rarely_seen:
+                parts.append("【角色存在感】以下角色长期未露面:\n" + "\n".join(rarely_seen))
+            if all_chars_absent and len(all_chars_absent) > 2:
+                parts.append(f"【剧情密度】{len(char_names)} 个角色出现在本章，" + "、".join(all_chars_absent[:4]) + f" 等 {len(all_chars_absent)} 个角色未出场。考虑配角线是否需要推进")
+
+            # 2. 活跃伏笔
+            active_fs = []
+            critical_fs = []
+            for fs in graph_foreshadows:
+                s = fs.get("status", "")
+                if s not in ("planted", "building"):
+                    continue
+                planted = int(fs.get("plantedChapter", 0) or 0)
+                if planted <= 0 or planted > chapter_num:
+                    continue
+                age = chapter_num - planted
+                desc = fs.get("description", "")[:80]
+                eid = fs.get("id", "?")[:12]
+                if age > FORESHADOW_AGE_CRITICAL:
+                    critical_fs.append(f"[!!] '{desc}' 已埋 {age} 章——再不回收读者要忘了")
+                elif age > FORESHADOW_AGE_NORMAL:
+                    active_fs.append(f"[!] '{desc}' 已埋 {age} 章——如果本章情节合适请推进")
+
+            if critical_fs:
+                parts.append("【伏笔紧急】\n" + "\n".join(critical_fs))
+            elif active_fs:
+                parts.append("【伏笔提醒】\n" + "\n".join(active_fs))
+
+            # 3. 如果没有任何提醒——说明剧情平衡，给正向反馈
+            if not parts and chapter_num > 5:
+                parts.append(f"【图谱状态】{len(graph_chars)} 个角色出场节奏正常，伏笔状态良好。保持。")
+
+            return "\n\n".join(parts) if parts else ""
+
+        except Exception as e:
+            raise RuntimeError(f"图谱注入失败——请确认墨脉图后端是否启动: {e}") from e
 
     def _load_last_300_words(self, chapter_num: int) -> str:
         if chapter_num <= 1:

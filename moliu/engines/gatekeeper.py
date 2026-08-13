@@ -101,21 +101,45 @@ class Gatekeeper:
         # ========== 2. 章节大纲检查 ==========
         outline_dir = data_dir / "outlines"
         if outline_dir.exists():
-            # 检查是否有任何大纲文件定义了该章节
+            # 先通过卷索引找到大纲文件，再检查该章节是否在卷范围内
             chapter_found = False
-            for f in sorted(outline_dir.glob("*.yaml")):
+            outline_file = None
+
+            # 优先检查卷索引指定的大纲文件
+            if vol_index_path.exists():
                 try:
-                    text = f.read_text(encoding="utf-8")
-                    if f"第{chapter_num}章" in text or f"第 {chapter_num} 章" in text:
-                        chapter_found = True
-                        break
+                    vol_index = VolumeIndex.from_json(vol_index_path)
+                    volume = vol_index.get_volume_for_chapter(chapter_num)
+                    if volume and volume.name:
+                        # 尝试匹配大纲文件名（卷名可能不完全等于文件名）
+                        for f in sorted(outline_dir.glob("*.yaml")):
+                            chapter_found = self._check_chapter_in_outline(f, chapter_num)
+                            if chapter_found:
+                                outline_file = f
+                                break
                 except Exception:
-                    continue
+                    pass
+
+            # 如果卷索引没找到，扫描所有大纲文件
             if not chapter_found:
-                result.missing_items.append(
-                    f"第 {chapter_num} 章未在 data/outlines/ 中找到大纲定义。"
-                    f"请先在大纲文件中定义本章节拍"
-                )
+                for f in sorted(outline_dir.glob("*.yaml")):
+                    chapter_found = self._check_chapter_in_outline(f, chapter_num)
+                    if chapter_found:
+                        outline_file = f
+                        break
+
+            if not chapter_found:
+                # 检查该章是否在已完成的范围内（已生成的章节不需要大纲）
+                existing_chapter = output_dir / f"第{chapter_num}章" / "正文.md"
+                if existing_chapter.exists():
+                    result.warnings.append(
+                        f"第 {chapter_num} 章已有正文，大纲检查跳过"
+                    )
+                else:
+                    result.missing_items.append(
+                        f"第 {chapter_num} 章未在 data/outlines/ 中找到大纲定义。"
+                        f"请先在大纲文件中定义本章节拍"
+                    )
 
         # ========== 3. 节拍检查 ==========
         if not beat or len(beat.strip()) < 5:
@@ -214,3 +238,40 @@ class Gatekeeper:
             f"全部打勾后才能生成。",
         ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _check_chapter_in_outline(filepath: Path, chapter_num: int) -> bool:
+        """检查大纲文件中是否定义了指定章节
+
+        支持以下格式：
+        - "第N章" / "第 N 章" / "第N章：" 等变体
+        - YAML 结构化大纲中的 chapter_num 字段
+        """
+        try:
+            text = filepath.read_text(encoding="utf-8")
+            # 方法1: 文本匹配（兼容 Markdown 风格大纲）
+            import re
+            patterns = [
+                rf"第\s*{chapter_num}\s*章",
+                rf"chapter.*{chapter_num}",
+            ]
+            for pat in patterns:
+                if re.search(pat, text):
+                    return True
+            # 方法2: YAML 结构化解析
+            try:
+                import yaml
+                data = yaml.safe_load(text)
+                if isinstance(data, dict):
+                    chapters = data.get("chapters", [])
+                    if isinstance(chapters, list):
+                        for ch in chapters:
+                            if isinstance(ch, dict) and ch.get("num") == chapter_num:
+                                return True
+                            if isinstance(ch, dict) and ch.get("chapter_num") == chapter_num:
+                                return True
+            except Exception:
+                pass
+            return False
+        except Exception:
+            return False

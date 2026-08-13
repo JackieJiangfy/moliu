@@ -43,13 +43,11 @@ services:
     environment:
       # 连接墨流后端
       - MOLIU_API_URL=http://moliu-api:8000
-      # 自定义导航（墨流页面）
-      - WEBUI_CUSTOM_NAVIGATION=${WEBUI_CUSTOM_NAVIGATION:-}
-      # 允许加载外部页面
-      - WEBUI_ALLOW_IFRAME=true
+      # OpenWebUI 配置（通过 Admin Panel 手动配置 Pipelines）
+      # Pipelines 插件需要通过 OpenWebUI Admin Panel > 设置 > Pipelines 导入
     volumes:
       - openwebui-data:/app/backend/data
-      # 挂载 Pipelines 插件（可选）
+      # 挂载 Pipelines 插件（通过 Admin Panel 导入）
       - ./moliu/pipelines:/app/pipelines
 
 volumes:

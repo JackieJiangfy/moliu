@@ -21,7 +21,7 @@ class TestRetryLogic:
         )
         # 模拟 tenacity 的 RetryCallState
         attempt = MagicMock()
-        attempt.exception.return_value = exc
+        attempt.outcome.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -36,7 +36,7 @@ class TestRetryLogic:
             response=MagicMock(status_code=429),
         )
         attempt = MagicMock()
-        attempt.exception.return_value = exc
+        attempt.outcome.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -51,7 +51,7 @@ class TestRetryLogic:
             response=MagicMock(status_code=401),
         )
         attempt = MagicMock()
-        attempt.exception.return_value = exc
+        attempt.outcome.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is False
@@ -62,7 +62,7 @@ class TestRetryLogic:
 
         exc = TimeoutException("Timeout")
         attempt = MagicMock()
-        attempt.exception.return_value = exc
+        attempt.outcome.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -74,7 +74,7 @@ class TestRetryLogic:
 
         exc = ConnectError("Connection Refused")
         attempt = MagicMock()
-        attempt.exception.return_value = exc
+        attempt.outcome.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -86,7 +86,7 @@ class TestRetryLogic:
 
         exc = ReadError("Read Error")
         attempt = MagicMock()
-        attempt.exception.return_value = exc
+        attempt.outcome.exception.return_value = exc
 
         retry = _RetryIfServerError()
         assert retry(attempt) is True
@@ -96,7 +96,7 @@ class TestRetryLogic:
         from unittest.mock import MagicMock
 
         attempt = MagicMock()
-        attempt.exception.return_value = None
+        attempt.outcome.exception.return_value = None
 
         retry = _RetryIfServerError()
         assert retry(attempt) is False

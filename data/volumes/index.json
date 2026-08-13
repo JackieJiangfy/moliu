@@ -1,0 +1,44 @@
+{
+  "novel_title": "亡灵银行",
+  "volumes": [
+    {
+      "id": 1,
+      "name": "亡灵银行",
+      "subtitle": "社畜入职地府",
+      "chapter_start": 1,
+      "chapter_end": 30,
+      "summary": "沈夜继承亡灵银行，从社畜审计员到地府银行行长，建立基本业务框架。",
+      "arcs": [],
+      "chapters": [],
+      "status": "completed",
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z"
+    },
+    {
+      "id": 2,
+      "name": "功德币风云",
+      "subtitle": "业务扩展与危机",
+      "chapter_start": 31,
+      "chapter_end": 80,
+      "summary": "银行业务扩展，功德币体系引入，地府财政危机初现端倪。",
+      "arcs": [],
+      "chapters": [],
+      "status": "completed",
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z"
+    },
+    {
+      "id": 3,
+      "name": "地府财政危机",
+      "subtitle": "审计与真相",
+      "chapter_start": 81,
+      "chapter_end": 125,
+      "summary": "地府财政体系崩塌真相浮出水面，沈夜深入审计发现更大阴谋。",
+      "arcs": [],
+      "chapters": [],
+      "status": "completed",
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z"
+    }
+  ]
+}

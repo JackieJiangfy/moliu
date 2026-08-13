@@ -1,45 +1,35 @@
 {
-  "说明": "OpenWebUI 配置参考 — 手动设置用",
-  "custom_navigation": [
-    {
-      "id": "moliu-dashboard",
-      "label": "📊 故事看板",
-      "icon": "bar-chart",
-      "url": "http://localhost:8000/static/dashboard.html",
-      "target": "iframe"
-    },
-    {
-      "id": "moliu-volumes",
-      "label": "📖 卷规划",
-      "icon": "book",
-      "url": "http://localhost:8000/static/volumes.html",
-      "target": "iframe"
-    },
-    {
-      "id": "moliu-generator",
-      "label": "✏️ 生成章节",
-      "icon": "edit",
-      "url": "http://localhost:8000/static/generator.html",
-      "target": "iframe"
-    },
-    {
-      "id": "moliu-api",
-      "label": "📋 API 文档",
-      "icon": "code",
-      "url": "http://localhost:8000/docs",
-      "target": "iframe"
-    }
-  ],
-  "env_vars": {
-    "WEBUI_CUSTOM_NAVIGATION": "JSON 字符串，内容同上",
-    "WEBUI_ALLOW_IFRAME": "true",
-    "MOLIU_API_URL": "http://moliu-api:8000（Docker 内）或 http://localhost:8000（宿主机）"
+  "说明": "OpenWebUI 集成配置参考 — 手动设置用",
+  "架构": {
+    "openwebui": "http://localhost:3000 — 主界面（聊天 + 工作空间）",
+    "moliu_api": "http://localhost:8000 — 墨流后端 API",
+    "前端页面": "http://localhost:8000/static/dashboard.html — 故事看板/卷规划/生成器（独立页面，通过浏览器书签访问）"
   },
   "pipelines": {
-    "说明": "将 pipelines/ 目录下的 .py 文件放入 OpenWebUI 的 pipelines 目录",
-    "模型列表": [
-      "📝 章节生成助手 — 对话式生成章节",
-      "📐 大纲规划助手 — 规划卷结构"
+    "说明": "通过 OpenWebUI Admin Panel > 工作空间 > 函数 > Pipelines 导入以下文件",
+    "插件列表": [
+      {
+        "文件": "moliu/pipelines/chapter_generator.py",
+        "虚拟模型": "📝 章节生成助手",
+        "功能": "对话式生成章节，自动调用 Gatekeeper 预检 + POST /generate"
+      },
+      {
+        "文件": "moliu/pipelines/outline_planner.py",
+        "虚拟模型": "📐 大纲规划助手",
+        "功能": "对话式管理卷结构（创建/列表/删除）"
+      }
     ]
+  },
+  "使用流程": {
+    "步骤1": "启动 docker compose up -d",
+    "步骤2": "访问 http://localhost:3000 注册管理员账号",
+    "步骤3": "Admin Panel > 设置 > 外部链接 > 添加 OpenAI 兼容 API（DeepSeek）",
+    "步骤4": "工作空间 > 函数 > 导入 Pipelines 插件文件",
+    "步骤5": "在模型选择器中选择「📝 章节生成助手」开始对话生成",
+    "步骤6": "浏览器书签收藏 http://localhost:8000/static/dashboard.html 查看故事看板"
+  },
+  "端口规划": {
+    "3000": "OpenWebUI",
+    "8000": "墨流 FastAPI 后端"
   }
 }

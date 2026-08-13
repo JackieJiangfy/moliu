@@ -109,6 +109,48 @@ class MomaituSyncClient:
 
         return payload["data"]
 
+    async def _get(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+        """GET 请求，自动带 token"""
+        await self._login()
+        url = f"{self.base_url}{path}"
+        headers = {"Authorization": self._token}
+        try:
+            r = await self._client.get(url, params=params or {}, headers=headers)
+        except httpx.HTTPError as e:
+            raise MomaituSyncError(f"请求失败 {path}: {e}") from e
+        if r.status_code == 401:
+            self._token = None
+            await self._login()
+            r = await self._client.get(url, params=params or {}, headers={"Authorization": self._token})
+        try:
+            payload = r.json()
+        except Exception as e:
+            raise MomaituSyncError(f"响应解析失败 {path}: {e}") from e
+        if payload.get("code") != 200:
+            raise MomaituSyncError(f"查询失败 {path}: {payload.get('message')}")
+        return payload["data"]
+
+    async def get_characters(self, novel_id: str) -> list[dict]:
+        """获取小说的所有角色"""
+        data = await self._get(f"/novel/{novel_id}/characters")
+        if isinstance(data, dict) and "records" in data:
+            return data["records"]
+        return data if isinstance(data, list) else []
+
+    async def get_chapters(self, novel_id: str) -> list[dict]:
+        """获取小说的所有章节"""
+        data = await self._get(f"/novel/{novel_id}/chapters")
+        if isinstance(data, dict) and "records" in data:
+            return data["records"]
+        return data if isinstance(data, list) else []
+
+    async def get_foreshadows(self, novel_id: str) -> list[dict]:
+        """获取小说的所有伏笔"""
+        data = await self._get(f"/novel/{novel_id}/foreshadows")
+        if isinstance(data, dict) and "records" in data:
+            return data["records"]
+        return data if isinstance(data, list) else []
+
     # ============ 公开同步方法 ============
 
     async def sync_character(self, novel_id: str, character: BaseModel | dict) -> dict:
@@ -143,3 +185,13 @@ class MomaituSyncClient:
         """同步伏笔（按 moliu_id upsert）"""
         body = foreshadow.model_dump(exclude_none=False) if isinstance(foreshadow, BaseModel) else dict(foreshadow)
         return await self._post(f"/novel/{novel_id}/sync/foreshadow", body)
+
+    async def sync_relationships(self, novel_id: str, relations: list[dict]) -> dict:
+        """批量同步角色关系（来自 LLM 抽取）
+
+        Args:
+            relations: [{source_name, target_name, rel_type, category, ...}, ...]
+        Returns:
+            {"success": n, "skipped": m, "updated": k}
+        """
+        return await self._post(f"/novel/{novel_id}/relationships/batch-sync", relations)

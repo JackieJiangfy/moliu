@@ -6,7 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from moliu.data.schemas import ChapterMeta
@@ -280,3 +280,286 @@ async def restore_chapter(request: Request, chapter_num: int, body: dict):
     current_path.write_text(content, encoding="utf-8")
 
     return {"ok": True, "chapter_num": chapter_num, "restored_version": target_version}
+
+
+# --- 章节生成 ---
+
+class GenerateResponse(BaseModel):
+    ok: bool
+    chapter_num: int
+    title: str = ""
+    word_count: int = 0
+    tokens_used: int = 0
+    content_preview: str = ""
+    quality_report: str = ""
+    filepath: str = ""
+
+
+async def _run_generation(
+    config,
+    chapter_num: int,
+    beat: str,
+    emotion: str,
+    characters_filter: list[str],
+    chapter_type: str = "auto",
+    temperature: float | None = None,
+    segmented: bool = True,
+) -> dict:
+    """执行完整生成管线（复用 CLI write 逻辑）"""
+    from moliu.cli.utils import load_characters, load_world, load_narrator
+    from moliu.engines.gateway import DeepSeekGateway
+    from moliu.prompts.manager import PromptManager
+    from moliu.engines.checker import ConsistencyChecker, AnchoredPreChecker
+    from moliu.engines.reader_eval import ReaderEvaluator
+    from moliu.rules.rhythm_tracker import RhythmTracker
+    from moliu.data.schemas import ChapterResult
+    from moliu.engines.generator import count_words
+    from moliu.orchestrator.pipeline import ChapterPipeline, QualityReport
+    from moliu.engines.usage import UsageTracker
+    from moliu.context.assembler import StructuredAssembler
+    from moliu.deai.detector import DeAIDetector
+    from moliu.deai.rewriter import DeAIRewriter
+
+    all_characters = load_characters(config)
+    if not all_characters:
+        raise ValueError("没有找到角色文件")
+
+    if characters_filter:
+        characters = [c for c in all_characters if c.name in characters_filter]
+    else:
+        characters = all_characters
+
+    world = load_world(config)
+    narrator = load_narrator(config)
+
+    gateway = DeepSeekGateway(config)
+    prompts = PromptManager(config)
+
+    checker = ConsistencyChecker(gateway)
+    prechecker = AnchoredPreChecker(gateway)
+    reader = ReaderEvaluator(gateway)
+    tracker = RhythmTracker(config.resolve_data_dir())
+    usage_tracker = UsageTracker(
+        config.resolve_data_dir() / "usage_log.jsonl",
+        monthly_budget=getattr(config, 'monthly_token_budget', 0),
+    )
+    gateway.usage_tracker = usage_tracker
+
+    pipeline = ChapterPipeline(
+        config, gateway, prompts,
+        checker=checker, prechecker=prechecker,
+        reader=reader, tracker=tracker,
+    )
+
+    # 1. 锚点预检
+    pre_ok, pre_text = await pipeline.run_pre_check(beat, characters, chapter_num=chapter_num)
+
+    # 2. 上下文组装
+    assembler = StructuredAssembler(config)
+    ctx = await assembler.assemble(
+        chapter_num, beat, characters, world,
+        narrator=narrator, narrator_guide="",
+        last_emotion=emotion,
+    )
+
+    # 3. 生成
+    result = await pipeline.generator.generate_chapter(
+        chapter_num=chapter_num,
+        beat=beat,
+        characters=characters,
+        world=world,
+        last_emotion=emotion,
+        recent_chapters=ctx.recent_chapters_full,
+        narrator_card=narrator,
+        temperature=temperature,
+        segmented=segmented,
+        chapter_type=chapter_type,
+    )
+
+    # 4. 去AI味
+    detector = DeAIDetector()
+    l1_report = detector.detect_l1(result.content)
+    if l1_report.hard_violations or l1_report.overall_score < 0.8:
+        rewriter = DeAIRewriter(gateway)
+        try:
+            rewritten = await rewriter.rewrite_flagged(
+                result.content, l1_report.flagged_paragraphs[:3],
+                chapter_num=chapter_num,
+            )
+            if rewritten != result.content:
+                result = ChapterResult(
+                    chapter_num=result.chapter_num,
+                    content=rewritten,
+                    word_count=count_words(rewritten),
+                    model_used=result.model_used,
+                    tokens_used=result.tokens_used,
+                )
+        except Exception:
+            pass
+
+    # 5. 质检
+    qr = QualityReport()
+    try:
+        qr = await pipeline.run_quality_checks(result, beat, characters, world, narrator, chapter_num=chapter_num)
+    except Exception:
+        pass
+
+    # 6. 落盘 + 记忆 + 节奏
+    summary_text = await pipeline.generator._generate_summary_with_llm(result.content, chapter_num)
+    clean_summary = summary_text.replace(f"第{chapter_num}章【摘要】", "")
+
+    pipeline.save_meta(chapter_num, result, qr, clean_summary, emotion, characters)
+    pipeline.save_to_memory(chapter_num, result, clean_summary, emotion, characters)
+    pipeline.save_rhythm_record(chapter_num, result, qr, chapter_type, emotion)
+
+    filepath = config.resolve_output_dir() / f"第{chapter_num}章" / "正文.md"
+
+    return {
+        "result": result,
+        "filepath": str(filepath),
+        "quality": qr,
+    }
+
+
+@router.post("/generate", response_model=GenerateResponse)
+async def generate_chapter(request: Request, body: GenerateRequest):
+    """生成单章（含 Gatekeeper 强制校验 + 完整管线）"""
+    cfg = request.app.state.config
+    from moliu.cli.utils import load_characters
+
+    all_chars = load_characters(cfg)
+    char_names = body.characters if body.characters else []
+    selected = [c for c in all_chars if c.name in char_names] if char_names else all_chars
+
+    # Gatekeeper 校验
+    gatekeeper = Gatekeeper(cfg)
+    gk = await gatekeeper.check(
+        body.chapter_num, selected,
+        beat=body.beat, emotion=body.emotion,
+        force_check=True,
+    )
+    if not gk.passed:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "Gatekeeper 校验未通过",
+                "missing_items": gk.missing_items,
+                "warnings": gk.warnings,
+            },
+        )
+
+    # 执行生成
+    try:
+        gen = await _run_generation(
+            cfg,
+            chapter_num=body.chapter_num,
+            beat=body.beat,
+            emotion=body.emotion,
+            characters_filter=body.characters,
+            chapter_type=body.chapter_type,
+            temperature=body.temperature,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)[:200]}")
+
+    result = gen["result"]
+    qr = gen["quality"]
+
+    return GenerateResponse(
+        ok=True,
+        chapter_num=result.chapter_num,
+        word_count=result.word_count,
+        tokens_used=result.tokens_used,
+        content_preview=result.content[:200],
+        quality_report=qr.summary(),
+        filepath=gen["filepath"],
+    )
+
+
+@router.websocket("/generate/stream")
+async def generate_stream(ws: WebSocket):
+    """WebSocket 流式生成 — 实时推送生成进度"""
+    await ws.accept()
+    try:
+        # 等待客户端发送生成参数
+        data = await ws.receive_json()
+        chapter_num = data.get("chapter_num")
+        beat = data.get("beat", "")
+        emotion = data.get("emotion", "轻松")
+        characters_filter = data.get("characters", [])
+        chapter_type = data.get("chapter_type", "auto")
+        temperature = data.get("temperature")
+
+        if not chapter_num or not beat:
+            await ws.send_json({"type": "error", "message": "缺少 chapter_num 或 beat"})
+            await ws.close()
+            return
+
+        cfg = ws.app.state.config
+
+        # 1. Gatekeeper 校验
+        await ws.send_json({"type": "step", "step": "gatekeeper", "status": "running"})
+        from moliu.cli.utils import load_characters
+        all_chars = load_characters(cfg)
+        selected = [c for c in all_chars if c.name in characters_filter] if characters_filter else all_chars
+
+        gatekeeper = Gatekeeper(cfg)
+        gk = await gatekeeper.check(
+            chapter_num, selected,
+            beat=beat, emotion=emotion,
+            force_check=True,
+        )
+        if not gk.passed:
+            await ws.send_json({
+                "type": "gatekeeper_failed",
+                "missing_items": gk.missing_items,
+                "warnings": gk.warnings,
+            })
+            await ws.close()
+            return
+
+        await ws.send_json({"type": "step", "step": "gatekeeper", "status": "passed"})
+
+        # 2. 执行生成
+        await ws.send_json({"type": "step", "step": "generating", "status": "running"})
+        try:
+            gen = await _run_generation(
+                cfg,
+                chapter_num=chapter_num,
+                beat=beat,
+                emotion=emotion,
+                characters_filter=characters_filter,
+                chapter_type=chapter_type,
+                temperature=temperature,
+            )
+        except Exception as e:
+            await ws.send_json({"type": "error", "message": f"生成失败: {str(e)[:200]}"})
+            await ws.close()
+            return
+
+        result = gen["result"]
+        qr = gen["quality"]
+
+        # 3. 推送结果
+        await ws.send_json({
+            "type": "complete",
+            "chapter_num": result.chapter_num,
+            "word_count": result.word_count,
+            "tokens_used": result.tokens_used,
+            "content": result.content,
+            "quality_report": qr.summary(),
+            "filepath": gen["filepath"],
+        })
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        try:
+            await ws.send_json({"type": "error", "message": str(e)[:200]})
+        except Exception:
+            pass
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
