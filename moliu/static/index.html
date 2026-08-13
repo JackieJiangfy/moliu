@@ -204,8 +204,9 @@ function toast(msg, type, duration) {
 }
 
 // Modal
-function showModal(html) {
-  document.getElementById('modal-container').innerHTML = '<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="modal-overlay"><div class="bg-white rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto scrollbar slide-up">' + html + '</div></div>';
+function showModal(html, wide) {
+  const maxW = wide ? 'max-w-3xl' : 'max-w-lg';
+  document.getElementById('modal-container').innerHTML = '<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="modal-overlay"><div class="bg-white rounded-lg '+maxW+' w-full max-h-[85vh] overflow-y-auto scrollbar slide-up">' + html + '</div></div>';
   document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'modal-overlay') closeModal(); });
 }
 function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
@@ -438,7 +439,98 @@ async function loadChapters() {
 window.showChapterDetail = async function(chNum) {
   try {
     const ch = await api('/chapters/'+chNum);
-    showModal('<div class="flex flex-col max-h-[85vh]"><div class="px-6 py-4 border-b border-ink-200 flex items-center justify-between"><div><h3 class="font-brush text-2xl text-vermilion-700">第'+ch.chapter_num+'章</h3><p class="text-sm text-ink-600 mt-1">'+escapeHtml(ch.title)+'</p></div><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600 text-xl">×</button></div><div class="px-6 py-4 overflow-y-auto scrollbar flex-1"><div class="text-xs text-ink-500 flex gap-4 mb-4 pb-3 border-b border-ink-100 flex-wrap"><span>📊 '+ch.word_count+'字</span>'+(ch.emotion?'<span>🎭 '+escapeHtml(ch.emotion)+'</span>':'')+(ch.volume_id?'<span>📖 卷'+ch.volume_id+'</span>':'')+'</div>'+(ch.summary?'<div class="bg-ink-50 rounded p-3 mb-4 text-sm text-ink-700"><b>摘要：</b>'+escapeHtml(ch.summary)+'</div>':'')+(ch.key_events&&ch.key_events.length?'<div class="mb-4 text-sm"><b class="text-ink-700">关键事件：</b><ul class="mt-1 text-ink-600">'+ch.key_events.map(function(e){ return '<li>• '+escapeHtml(e)+'</li>'; }).join('')+'</ul></div>':'')+'<div class="text-ink-800 leading-relaxed whitespace-pre-wrap text-sm">'+(escapeHtml(ch.content)||'<span class="text-ink-400">（无正文）</span>')+'</div></div></div>');
+    const metaHtml = '<div class="text-xs text-ink-500 flex gap-4 mb-4 pb-3 border-b border-ink-100 flex-wrap"><span>📊 '+ch.word_count+'字</span>'+(ch.emotion?'<span>🎭 '+escapeHtml(ch.emotion)+'</span>':'')+(ch.volume_id?'<span>📖 卷'+ch.volume_id+'</span>':'')+'</div>'+(ch.summary?'<div class="bg-ink-50 rounded p-3 mb-4 text-sm text-ink-700"><b>摘要：</b>'+escapeHtml(ch.summary)+'</div>':'')+(ch.key_events&&ch.key_events.length?'<div class="mb-4 text-sm"><b class="text-ink-700">关键事件：</b><ul class="mt-1 text-ink-600">'+ch.key_events.map(function(e){ return '<li>• '+escapeHtml(e)+'</li>'; }).join('')+'</ul></div>':'');
+    const contentHtml = '<div id="ch-content-view" class="text-ink-800 leading-relaxed whitespace-pre-wrap text-sm">'+(escapeHtml(ch.content)||'<span class="text-ink-400">（无正文）</span>')+'</div>';
+    const editHtml = '<div id="ch-content-edit" class="hidden"><textarea id="ch-edit-area" class="ink-input w-full border border-ink-300 rounded p-3 text-sm bg-white resize-none font-serif" style="min-height:400px">'+escapeHtml(ch.content)+'</textarea></div>';
+    const versionHtml = '<div id="ch-versions-panel" class="hidden mt-4 pt-4 border-t border-ink-100"><div class="flex items-center justify-between mb-2"><span class="text-xs font-medium text-ink-700">版本历史</span><button id="refresh-versions-btn" class="text-xs text-ink-500 hover:text-vermilion-600">刷新</button></div><div id="ch-versions-list" class="space-y-1 max-h-40 overflow-y-auto scrollbar"></div></div>';
+    showModal('<div class="flex flex-col max-h-[85vh]"><div class="px-6 py-4 border-b border-ink-200 flex items-center justify-between"><div><h3 class="font-brush text-2xl text-vermilion-700">第'+ch.chapter_num+'章</h3><p class="text-sm text-ink-600 mt-1">'+escapeHtml(ch.title)+'</p></div><div class="flex items-center gap-2"><button id="ch-edit-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">编辑</button><button id="ch-versions-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">版本</button><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600 text-xl ml-1">×</button></div></div><div class="px-6 py-4 overflow-y-auto scrollbar flex-1" id="ch-detail-body">'+metaHtml+contentHtml+editHtml+versionHtml+'</div><div id="ch-edit-actions" class="hidden px-6 py-3 border-t border-ink-200 flex justify-end gap-2 bg-ink-50"><button id="ch-cancel-edit-btn" class="text-xs text-ink-600 hover:bg-ink-100 px-3 py-2 rounded">取消</button><button id="ch-save-btn" class="text-xs bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-2 rounded">保存新版本</button></div></div>', true);
+
+    // 编辑模式切换
+    document.getElementById('ch-edit-btn').addEventListener('click', function() {
+      const view = document.getElementById('ch-content-view');
+      const edit = document.getElementById('ch-content-edit');
+      const actions = document.getElementById('ch-edit-actions');
+      const btn = this;
+      if (edit.classList.contains('hidden')) {
+        view.classList.add('hidden'); edit.classList.remove('hidden'); actions.classList.remove('hidden');
+        btn.textContent = '退出编辑'; btn.classList.add('bg-vermilion-100');
+        document.getElementById('ch-edit-area').focus();
+      } else {
+        view.classList.remove('hidden'); edit.classList.add('hidden'); actions.classList.add('hidden');
+        btn.textContent = '编辑'; btn.classList.remove('bg-vermilion-100');
+      }
+    });
+
+    // 保存新版本
+    document.getElementById('ch-save-btn').addEventListener('click', async function() {
+      const newContent = document.getElementById('ch-edit-area').value;
+      if (!newContent.trim()) { toast('内容不能为空', 'warn'); return; }
+      const ok = await confirmDialog('保存新版本', '当前正文将备份为历史版本，确定保存？');
+      if (!ok) return;
+      try {
+        const res = await api('/chapters/'+chNum+'/content', { method: 'POST', body: JSON.stringify({ content: newContent }) });
+        toast('已保存（版本 v'+res.version+'）', 'success');
+        closeModal();
+        showChapterDetail(chNum); // 重新打开刷新
+      } catch(e) { toast('保存失败: ' + e.message, 'error'); }
+    });
+
+    document.getElementById('ch-cancel-edit-btn').addEventListener('click', function() {
+      document.getElementById('ch-content-view').classList.remove('hidden');
+      document.getElementById('ch-content-edit').classList.add('hidden');
+      document.getElementById('ch-edit-actions').classList.add('hidden');
+      document.getElementById('ch-edit-btn').textContent = '编辑';
+      document.getElementById('ch-edit-btn').classList.remove('bg-vermilion-100');
+    });
+
+    // 版本历史
+    async function loadVersions() {
+      const listEl = document.getElementById('ch-versions-list');
+      listEl.innerHTML = '<div class="text-xs text-ink-400">加载中...</div>';
+      try {
+        const data = await api('/chapters/'+chNum+'/versions');
+        const versions = data.versions || [];
+        const current = data.current || {};
+        let html = '';
+        if (current.version) {
+          html += '<div class="flex items-center justify-between text-xs px-2 py-1.5 bg-vermilion-500/10 rounded"><span class="text-vermilion-700">● 当前 v'+current.version+' ('+current.size+'字)</span></div>';
+        }
+        if (versions.length === 0) {
+          html += '<div class="text-xs text-ink-400 text-center py-2">无历史版本</div>';
+        } else {
+          versions.slice().reverse().forEach(function(v) {
+            html += '<div class="flex items-center justify-between text-xs px-2 py-1.5 hover:bg-ink-50 rounded"><span class="text-ink-600">v'+v.version+' ('+v.size+'字)</span><button data-ver="'+v.version+'" class="restore-ver-btn text-vermilion-600 hover:underline">回滚</button></div>';
+          });
+        }
+        listEl.innerHTML = html;
+        listEl.querySelectorAll('.restore-ver-btn').forEach(function(btn) {
+          btn.addEventListener('click', async function() {
+            const ver = parseInt(this.dataset.ver);
+            const ok = await confirmDialog('回滚版本', '确定回滚到 v'+ver+'？当前正文将备份为新版本。');
+            if (!ok) return;
+            try {
+              await api('/chapters/'+chNum+'/restore', { method: 'POST', body: JSON.stringify({ version: ver }) });
+              toast('已回滚到 v'+ver, 'success');
+              closeModal();
+              showChapterDetail(chNum);
+            } catch(e) { toast('回滚失败: ' + e.message, 'error'); }
+          });
+        });
+      } catch(e) { listEl.innerHTML = '<div class="text-xs text-vermilion-600">加载失败</div>'; }
+    }
+
+    document.getElementById('ch-versions-btn').addEventListener('click', function() {
+      const panel = document.getElementById('ch-versions-panel');
+      if (panel.classList.contains('hidden')) {
+        panel.classList.remove('hidden');
+        this.classList.add('bg-vermilion-100');
+        loadVersions();
+      } else {
+        panel.classList.add('hidden');
+        this.classList.remove('bg-vermilion-100');
+      }
+    });
+    document.getElementById('refresh-versions-btn').addEventListener('click', loadVersions);
   } catch(e) { toast('加载失败: ' + e.message, 'error'); }
 };
 document.getElementById('volume-filter').addEventListener('change', function(e) { state.volumeFilter = e.target.value; state.chapterRange = { start: 1, end: 50 }; loadChapters(); });
