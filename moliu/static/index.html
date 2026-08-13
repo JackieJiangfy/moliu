@@ -108,7 +108,12 @@ tailwind.config = {
     </nav>
     <div class="p-4 border-t border-ink-200 text-xs text-ink-500">
       <div class="flex items-center gap-2 mb-1"><span id="status-dot" class="w-2 h-2 rounded-full bg-gold-500"></span><span id="status-text">连接中...</span></div>
-      <div id="novel-info" class="text-ink-400 truncate">未加载</div>
+      <div id="novel-info" class="text-ink-400 truncate mb-2">未加载</div>
+      <div id="progress-panel" class="hidden">
+        <div class="flex items-center justify-between mb-1"><span class="text-ink-500">总进度</span><span id="progress-text" class="text-ink-700 font-medium">-</span></div>
+        <div class="w-full bg-ink-200 rounded-full h-1.5 mb-2"><div id="progress-bar" class="bg-vermilion-500 h-1.5 rounded-full transition-all" style="width:0%"></div></div>
+        <div id="volume-progress" class="space-y-1"></div>
+      </div>
     </div>
   </aside>
   <main class="flex-1 flex flex-col overflow-hidden">
@@ -249,10 +254,42 @@ async function checkStatus() {
     document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-bamboo-500';
     document.getElementById('status-text').textContent = '已连接';
     document.getElementById('novel-info').textContent = data.novel_title || data.title || '墨流';
+    loadProgress();
   } catch(e) {
     document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-vermilion-500';
     document.getElementById('status-text').textContent = '未连接';
   }
+}
+
+async function loadProgress() {
+  try {
+    const vols = await api('/volumes');
+    if (vols.length === 0) return;
+    // 统计每卷已生成章节数
+    const outputDir = '/api/v1/chapters';
+    let totalChapters = 0, totalWritten = 0;
+    const volProgress = [];
+    for (const v of vols) {
+      const chStart = v.chapter_start, chEnd = v.chapter_end;
+      const chCount = chEnd - chStart + 1;
+      totalChapters += chCount;
+      // 查该卷范围已生成的章节数
+      const data = await api('/chapters?start='+chStart+'&end='+chEnd);
+      const written = (data.chapters || []).length;
+      totalWritten += written;
+      volProgress.push({ id: v.id, name: v.name, status: v.status, written: written, total: chCount });
+    }
+    const percent = totalChapters > 0 ? Math.round(totalWritten / totalChapters * 100) : 0;
+    document.getElementById('progress-panel').classList.remove('hidden');
+    document.getElementById('progress-text').textContent = totalWritten + '/' + totalChapters + ' (' + percent + '%)';
+    document.getElementById('progress-bar').style.width = percent + '%';
+    const volHtml = volProgress.map(function(vp) {
+      const p = vp.total > 0 ? Math.round(vp.written / vp.total * 100) : 0;
+      const stColor = { completed: 'bg-bamboo-500', active: 'bg-vermilion-500', planned: 'bg-ink-300' }[vp.status] || 'bg-ink-300';
+      return '<div class="flex items-center gap-2 text-xs"><span class="text-ink-500 w-8">卷'+vp.id+'</span><div class="flex-1 bg-ink-200 rounded-full h-1"><div class="'+stColor+' h-1 rounded-full" style="width:'+p+'%"></div></div><span class="text-ink-400 w-12 text-right">'+vp.written+'/'+vp.total+'</span></div>';
+    }).join('');
+    document.getElementById('volume-progress').innerHTML = volHtml;
+  } catch(e) { /* 进度加载失败不影响使用 */ }
 }
 
 // 模型
@@ -651,6 +688,7 @@ document.getElementById('sidebar-overlay').addEventListener('click', function() 
 
 // 智能生成 Modal
 window.openGenerateModal = function() {
+  state.genBlocked = false;
   showModal('<div class="p-6" style="min-width:700px"><div class="flex items-center justify-between mb-4"><h3 class="font-bold text-lg text-ink-900">🪄 智能章节生成</h3><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600 text-xl">×</button></div><div class="space-y-4"><div><label class="text-xs text-ink-500 block mb-1">章节号</label><div class="flex gap-2"><input id="gen-ch-num" type="number" class="ink-input flex-1 border border-ink-300 rounded px-3 py-2 text-sm bg-white" placeholder="例：126" value="126"><button id="load-ctx-btn" class="bg-ink-700 hover:bg-ink-800 text-white px-4 py-2 rounded text-sm whitespace-nowrap">加载上下文</button></div></div><div id="ctx-preview" class="hidden space-y-3"></div><div id="gen-input-area" class="hidden space-y-3"><div><label class="text-xs text-ink-500 block mb-1">节拍（一句话描述本章发生的事）*</label><textarea id="gen-beat" rows="2" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none" placeholder="例：沈夜发现验钞机56%的真相"></textarea></div><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">情绪</label><select id="gen-emotion" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="轻松">轻松</option><option value="紧张">紧张</option><option value="悲伤">悲伤</option><option value="兴奋">兴奋</option><option value="愤怒">愤怒</option><option value="温馨">温馨</option></select></div><div class="flex items-end"><button id="run-gen-btn" class="w-full bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded text-sm font-medium">开始生成</button></div></div></div><div id="gen-result-area" class="hidden"></div></div></div>');
   document.getElementById('load-ctx-btn').addEventListener('click', loadGenContext);
   document.getElementById('run-gen-btn').addEventListener('click', runSmartGenerate);
@@ -665,6 +703,30 @@ async function loadGenContext() {
   try {
     const ctx = await api('/chapters/'+chNum+'/context');
     let html = '';
+    // 预检结果（强制信息收集）
+    try {
+      const check = await api('/generate/check?chapter_num='+chNum+'&beat=&emotion=&characters=');
+      if (check.passed) {
+        html += '<div class="bg-bamboo-500/10 border border-bamboo-500/30 rounded p-2 flex items-center gap-2 text-xs"><span class="text-bamboo-600 font-bold">✓</span><span class="text-bamboo-700">预检通过 — 信息齐全，可以生成</span></div>';
+      } else {
+        html += '<div class="bg-vermilion-500/10 border border-vermilion-500/30 rounded p-3"><div class="text-xs font-bold text-vermilion-700 mb-1">❌ 预检未通过 — 以下信息缺失：</div><ul class="text-xs text-vermilion-600 space-y-0.5 list-disc list-inside">';
+        check.missing_items.forEach(function(item) { html += '<li>'+escapeHtml(item)+'</li>'; });
+        html += '</ul></div>';
+        // 阻断生成按钮
+        state.genBlocked = true;
+      }
+      if (check.warnings && check.warnings.length) {
+        html += '<div class="bg-gold-500/10 border border-gold-500/30 rounded p-2"><div class="text-xs font-medium text-gold-700 mb-1">⚠️ 警告</div><ul class="text-xs text-gold-700 space-y-0.5 list-disc list-inside">';
+        check.warnings.forEach(function(w) { html += '<li>'+escapeHtml(w)+'</li>'; });
+        html += '</ul></div>';
+      }
+      if (check.context_hints && check.context_hints.length) {
+        html += '<div class="bg-ink-50 border border-ink-200 rounded p-2"><div class="text-xs font-medium text-ink-700 mb-1">💡 提示</div><ul class="text-xs text-ink-600 space-y-0.5 list-disc list-inside">';
+        check.context_hints.forEach(function(h) { html += '<li>'+escapeHtml(h)+'</li>'; });
+        html += '</ul></div>';
+      }
+    } catch(e) { /* 预检失败不阻断，继续显示上下文 */ }
+
     if (ctx.volume_id) html += '<div class="text-xs"><span class="bg-ink-100 text-ink-700 px-2 py-1 rounded">📖 卷'+ctx.volume_id+'</span></div>';
     if (ctx.arc_direction) html += '<details class="border border-ink-200 rounded"><summary class="text-xs font-medium text-ink-700 px-3 py-2 cursor-pointer hover:bg-ink-50">🧭 故事方向</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-ink-100">'+escapeHtml(ctx.arc_direction)+'</div></details>';
     if (ctx.character_snapshots) html += '<details class="border border-ink-200 rounded"><summary class="text-xs font-medium text-ink-700 px-3 py-2 cursor-pointer hover:bg-ink-50">🎭 角色状态</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-ink-100">'+escapeHtml(ctx.character_snapshots)+'</div></details>';
@@ -675,6 +737,17 @@ async function loadGenContext() {
     if (!html) html = '<div class="text-xs text-ink-400 text-center py-4">无可用上下文</div>';
     preview.innerHTML = html;
     document.getElementById('gen-input-area').classList.remove('hidden');
+    // 预检通过才启用生成按钮
+    const genBtn = document.getElementById('run-gen-btn');
+    if (state.genBlocked) {
+      genBtn.disabled = true;
+      genBtn.classList.add('opacity-50', 'cursor-not-allowed');
+      genBtn.textContent = '预检未通过，无法生成';
+    } else {
+      genBtn.disabled = false;
+      genBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+      genBtn.textContent = '开始生成';
+    }
     toast('上下文已加载', 'success', 1500);
   } catch(e) {
     preview.innerHTML = '<div class="text-xs text-vermilion-600">加载失败: '+escapeHtml(e.message)+'</div>';
@@ -682,6 +755,7 @@ async function loadGenContext() {
 }
 
 async function runSmartGenerate() {
+  if (state.genBlocked) { toast('预检未通过，请先补全缺失信息', 'warn'); return; }
   const chNum = parseInt(document.getElementById('gen-ch-num').value);
   const beat = document.getElementById('gen-beat').value.trim();
   const emotion = document.getElementById('gen-emotion').value;
