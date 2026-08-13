@@ -22,9 +22,9 @@ tailwind.config = {
           600: '#6f5e4a', 700: '#564636', 800: '#3d3025', 900: '#261d16',
           950: '#17110c',
         },
-        vermilion: { 500: '#c8453c', 600: '#a8392f', 700: '#8a2d26' },
-        bamboo: { 500: '#6b8e4e', 600: '#557340' },
-        gold: { 500: '#c9a961', 600: '#a88a45' },
+        vermilion: { 400: '#d65650', 500: '#c8453c', 600: '#a8392f', 700: '#8a2d26' },
+        bamboo: { 400: '#7da35e', 500: '#6b8e4e', 600: '#557340' },
+        gold: { 400: '#d9bd7a', 500: '#c9a961', 600: '#a88a45' },
       },
     },
   },
@@ -36,8 +36,6 @@ tailwind.config = {
   body { font-family: 'Noto Serif SC', serif; background: var(--bg); color: var(--ink); }
   .font-brush { font-family: 'Ma Shan Zheng', cursive; }
   .font-xiaowei { font-family: 'ZCOOL XiaoWei', serif; }
-
-  /* 纸张纹理 */
   .paper-bg {
     background-color: var(--paper);
     background-image: radial-gradient(circle at 20% 30%, rgba(138,121,96,0.04) 0%, transparent 40%),
@@ -46,595 +44,520 @@ tailwind.config = {
   .scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
   .scrollbar::-webkit-scrollbar-thumb { background: #c4b8a7; border-radius: 3px; }
   .scrollbar::-webkit-scrollbar-track { background: transparent; }
-
-  /* 印章 */
   .seal {
     display: inline-flex; align-items: center; justify-content: center;
-    background: #c8453c; color: #fff;
-    font-family: 'Ma Shan Zheng', cursive;
-    border-radius: 4px; padding: 2px 8px;
-    transform: rotate(-2deg);
-    box-shadow: 0 2px 8px rgba(200,69,60,0.3);
-    letter-spacing: 2px;
+    background: #c8453c; color: #fff; font-family: 'Ma Shan Zheng', cursive;
+    border-radius: 4px; padding: 2px 10px; transform: rotate(-2deg);
+    box-shadow: 0 2px 8px rgba(200,69,60,0.3); letter-spacing: 2px;
   }
-
-  /* 聊天气泡 */
   .msg-user { background: linear-gradient(135deg, #3d3025, #564636); color: #f7f5f2; }
-  .msg-ai {
-    background: #fff; border: 1px solid #ede8e1;
-    box-shadow: 0 1px 3px rgba(38,29,22,0.05);
-  }
-  .msg-ai pre {
-    background: #17110c; color: #ede8e1; padding: 12px;
-    border-radius: 6px; overflow-x: auto; margin: 8px 0;
-    font-family: 'Consolas', 'Noto Serif SC', monospace;
-    font-size: 13px;
-  }
-
-  /* 标签页 */
+  .msg-ai { background: #fff; border: 1px solid #ede8e1; box-shadow: 0 1px 3px rgba(38,29,22,0.05); }
+  .msg-ai pre { background: #17110c; color: #ede8e1; padding: 12px; border-radius: 6px; overflow-x: auto; margin: 8px 0; font-family: 'Consolas', monospace; font-size: 13px; }
+  .msg-ai h3 { font-weight: 700; color: #261d16; margin: 12px 0 4px; font-size: 15px; }
+  .msg-ai h4 { font-weight: 700; color: #3d3025; margin: 8px 0 2px; font-size: 14px; }
+  .msg-ai strong { color: #261d16; }
+  .msg-ai code:not(pre code) { background: #ede8e1; padding: 1px 5px; border-radius: 3px; font-size: 13px; color: #8a2d26; }
+  .msg-ai ul, .msg-ai ol { padding-left: 20px; margin: 4px 0; }
+  .msg-ai li { margin: 2px 0; }
   .tab-btn { transition: all 0.25s ease; position: relative; }
-  .tab-btn.active { color: #c8453c; }
-  .tab-btn.active::after {
-    content: ''; position: absolute; bottom: -1px; left: 50%;
-    transform: translateX(-50%); width: 24px; height: 2px;
-    background: #c8453c; border-radius: 1px;
-  }
-
-  /* 章节卡片 */
+  .tab-btn.active { color: #c8453c; background: rgba(200,69,60,0.05); }
+  .tab-btn.active::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: #c8453c; border-radius: 0 2px 2px 0; }
   .chapter-card { transition: all 0.2s ease; cursor: pointer; }
-  .chapter-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(38,29,22,0.1); }
-
-  /* 输入框聚焦 */
+  .chapter-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(38,29,22,0.12); }
+  .ink-input { transition: all 0.2s; }
   .ink-input:focus { outline: none; border-color: #8a7960; box-shadow: 0 0 0 3px rgba(138,121,96,0.15); }
-
-  /* 加载动画 */
   .typing-dot { animation: blink 1.4s infinite both; }
   .typing-dot:nth-child(2) { animation-delay: 0.2s; }
   .typing-dot:nth-child(3) { animation-delay: 0.4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
-
-  /* 渐入 */
   .fade-in { animation: fadeIn 0.4s ease both; }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  .slide-up { animation: slideUp 0.3s ease both; }
+  @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .skeleton { background: linear-gradient(90deg, #ede8e1 25%, #dcd3c7 50%, #ede8e1 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px; }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  .toast-item { animation: toastIn 0.3s ease both; }
+  @keyframes toastIn { from { opacity: 0; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+  .streaming-cursor::after { content: '▊'; color: #c8453c; animation: cursorBlink 0.8s infinite; }
+  @keyframes cursorBlink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+  @media (max-width: 768px) {
+    .sidebar { position: fixed; left: -256px; z-index: 50; height: 100%; transition: left 0.3s; }
+    .sidebar.open { left: 0; }
+    .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 40; }
+    .sidebar-overlay.show { display: block; }
+  }
+  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 </style>
 </head>
 <body class="h-screen overflow-hidden">
-
+<div class="sidebar-overlay" id="sidebar-overlay"></div>
 <div class="flex h-screen">
-  <!-- 侧边栏 -->
-  <aside class="w-64 flex-shrink-0 flex flex-col paper-bg border-r border-ink-200">
-    <!-- Logo -->
+  <aside class="sidebar w-64 flex-shrink-0 flex flex-col paper-bg border-r border-ink-200" id="sidebar">
     <div class="p-6 border-b border-ink-200">
-      <h1 class="font-brush text-3xl text-ink-900 leading-none">墨流</h1>
+      <div class="flex items-center justify-between">
+        <h1 class="font-brush text-3xl text-ink-900 leading-none">墨流</h1>
+        <button class="md:hidden text-ink-400" id="close-sidebar">×</button>
+      </div>
       <p class="text-xs text-ink-500 mt-1 font-xiaowei tracking-widest">小说创作工作台</p>
     </div>
-
-    <!-- 标签导航 -->
-    <nav class="flex-1 py-4">
-      <button data-tab="chat" class="tab-btn active w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50">
-        <span class="text-lg">💬</span><span class="text-sm font-medium">对话创作</span>
-      </button>
-      <button data-tab="volumes" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600">
-        <span class="text-lg">📖</span><span class="text-sm font-medium">卷宗规划</span>
-      </button>
-      <button data-tab="chapters" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600">
-        <span class="text-lg">📜</span><span class="text-sm font-medium">章节列表</span>
-      </button>
-      <button data-tab="settings" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600">
-        <span class="text-lg">🎭</span><span class="text-sm font-medium">世界设定</span>
-      </button>
+    <nav class="flex-1 py-2">
+      <button data-tab="chat" class="tab-btn active w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50"><span class="text-lg">💬</span><span class="text-sm font-medium">对话创作</span></button>
+      <button data-tab="volumes" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600"><span class="text-lg">📖</span><span class="text-sm font-medium">卷宗规划</span></button>
+      <button data-tab="chapters" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600"><span class="text-lg">📜</span><span class="text-sm font-medium">章节列表</span></button>
+      <button data-tab="settings" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600"><span class="text-lg">🎭</span><span class="text-sm font-medium">世界设定</span></button>
     </nav>
-
-    <!-- 底部状态 -->
     <div class="p-4 border-t border-ink-200 text-xs text-ink-500">
-      <div class="flex items-center gap-2 mb-1">
-        <span id="status-dot" class="w-2 h-2 rounded-full bg-bamboo-500"></span>
-        <span id="status-text">后端连接中...</span>
-      </div>
-      <div id="novel-info" class="text-ink-400">未加载</div>
+      <div class="flex items-center gap-2 mb-1"><span id="status-dot" class="w-2 h-2 rounded-full bg-gold-500"></span><span id="status-text">连接中...</span></div>
+      <div id="novel-info" class="text-ink-400 truncate">未加载</div>
     </div>
   </aside>
-
-  <!-- 主区域 -->
   <main class="flex-1 flex flex-col overflow-hidden">
+    <div class="md:hidden flex items-center justify-between px-4 py-2 border-b border-ink-200 paper-bg">
+      <button id="open-sidebar" class="text-ink-600">☰</button>
+      <span class="font-brush text-lg text-ink-900">墨流</span>
+      <div class="w-6"></div>
+    </div>
 
-    <!-- ============ 对话创作 ============ -->
+    <!-- 对话创作 -->
     <section id="tab-chat" class="tab-pane flex-1 flex flex-col overflow-hidden">
-      <header class="px-8 py-4 border-b border-ink-200 flex items-center justify-between paper-bg">
-        <div>
-          <h2 class="text-lg font-bold text-ink-900">对话创作</h2>
-          <p class="text-xs text-ink-500">选择助手 · 描述章节 · 自动生成</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <select id="model-select" class="ink-input border border-ink-300 rounded-md px-3 py-2 text-sm bg-white">
-            <option value="">加载中...</option>
-          </select>
-          <button id="clear-chat" class="text-xs text-ink-500 hover:text-vermilion-600 px-2 py-1">清空</button>
-        </div>
-      </header>
-
-      <div id="chat-messages" class="flex-1 overflow-y-auto scrollbar px-8 py-6 space-y-4">
-        <!-- 欢迎信息 -->
-        <div class="msg-ai rounded-lg p-4 max-w-3xl mx-auto fade-in">
-          <p class="text-sm text-ink-700 leading-relaxed">
-            <span class="font-brush text-vermilion-600 text-lg">歡迎。</span>
-            選擇上方的助手模型，告訴我你想創作什麼。<br>
-            <span class="text-ink-500 text-xs mt-2 block">
-              • <b>章節生成助手</b>：輸入「生成第126章 沈夜發現驗鈔機真相」<br>
-              • <b>大綱規劃助手</b>：輸入「列表」或「創建 新卷 第31-80章 摘要」<br>
-              • <b>元數據回填助手</b>：輸入「全部」查看缺失統計
-            </span>
-          </p>
-        </div>
-      </div>
-
-      <div class="px-8 py-4 border-t border-ink-200 paper-bg">
-        <div class="max-w-4xl mx-auto flex items-end gap-3">
-          <textarea id="chat-input" rows="2" placeholder="描述你想创作的内容..."
-            class="ink-input flex-1 border border-ink-300 rounded-lg px-4 py-3 text-sm resize-none bg-white"></textarea>
-          <button id="send-btn" class="bg-ink-800 hover:bg-ink-900 text-ink-50 px-6 py-3 rounded-lg text-sm font-medium transition disabled:opacity-50">
-            发送
-          </button>
-        </div>
-      </div>
-    </section>
-
-    <!-- ============ 卷宗规划 ============ -->
-    <section id="tab-volumes" class="tab-pane flex-1 overflow-y-auto scrollbar hidden">
-      <header class="px-8 py-4 border-b border-ink-200 flex items-center justify-between paper-bg sticky top-0 z-10">
-        <div>
-          <h2 class="text-lg font-bold text-ink-900">卷宗规划</h2>
-          <p class="text-xs text-ink-500">千章小说的卷结构</p>
-        </div>
-        <button id="new-volume-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded-md text-sm">+ 新建卷</button>
-      </header>
-      <div id="volumes-list" class="p-8 space-y-3">
-        <div class="text-center text-ink-400 py-12">加载中...</div>
-      </div>
-    </section>
-
-    <!-- ============ 章节列表 ============ -->
-    <section id="tab-chapters" class="tab-paneflex-1 overflow-y-auto scrollbar hidden">
-      <header class="px-8 py-4 border-b border-ink-200 flex items-center justify-between paper-bg sticky top-0 z-10">
-        <div>
-          <h2 class="text-lg font-bold text-ink-900">章节列表</h2>
-          <p class="text-xs text-ink-500" id="chapter-count">-</p>
-        </div>
+      <header class="px-6 py-3 border-b border-ink-200 flex items-center justify-between paper-bg">
+        <div><h2 class="text-base font-bold text-ink-900">对话创作</h2><p id="model-desc" class="text-xs text-ink-500 mt-0.5">选择助手模型开始创作</p></div>
         <div class="flex items-center gap-2">
-          <input id="chapter-start" type="number" value="1" class="ink-input w-20 border border-ink-300 rounded px-2 py-1 text-sm" placeholder="起">
-          <span class="text-ink-400">-</span>
-          <input id="chapter-end" type="number" value="50" class="ink-input w-20 border border-ink-300 rounded px-2 py-1 text-sm" placeholder="止">
-          <button id="load-chapters" class="bg-ink-700 hover:bg-ink-800 text-white px-3 py-1 rounded text-sm">查询</button>
+          <select id="model-select" class="ink-input border border-ink-300 rounded-md px-3 py-2 text-sm bg-white max-w-[200px]"><option value="">加载中...</option></select>
+          <button id="clear-chat" class="text-xs text-ink-500 hover:text-vermilion-600 px-2 py-2">清空</button>
         </div>
       </header>
-      <div id="chapters-list" class="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-        <div class="text-center text-ink-400 py-12 col-span-full">加载中...</div>
+      <div id="chat-messages" class="flex-1 overflow-y-auto scrollbar px-6 py-6 space-y-4">
+        <div class="msg-ai rounded-lg p-5 max-w-3xl mx-auto fade-in">
+          <p class="text-sm text-ink-700 leading-relaxed"><span class="font-brush text-vermilion-600 text-xl">歡迎。</span> 選擇上方的助手模型，告訴我你想創作什麼。</p>
+          <div class="text-xs text-ink-500 mt-3 space-y-1 border-t border-ink-100 pt-3">
+            <p>📝 <b>章節生成助手</b>：输入「生成第126章 沈夜发现验钞机真相」</p>
+            <p>📐 <b>大綱規劃助手</b>：输入「列表」或「创建 新卷 第31-80章 摘要」</p>
+            <p>🔧 <b>元數據回填助手</b>：输入「全部」查看缺失统计</p>
+          </div>
+        </div>
+      </div>
+      <div class="px-6 py-3 border-t border-ink-200 paper-bg">
+        <div class="max-w-4xl mx-auto flex items-end gap-3">
+          <textarea id="chat-input" rows="2" placeholder="描述你想创作的内容... (Enter 发送 / Shift+Enter 换行)" class="ink-input flex-1 border border-ink-300 rounded-lg px-4 py-3 text-sm resize-none bg-white"></textarea>
+          <button id="send-btn" class="bg-ink-800 hover:bg-ink-900 text-ink-50 px-6 py-3 rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed">发送</button>
+        </div>
       </div>
     </section>
 
-    <!-- ============ 世界设定 ============ -->
+    <!-- 卷宗规划 -->
+    <section id="tab-volumes" class="tab-pane flex-1 overflow-y-auto scrollbar hidden">
+      <header class="px-6 py-3 border-b border-ink-200 flex items-center justify-between paper-bg sticky top-0 z-10">
+        <div><h2 class="text-base font-bold text-ink-900">卷宗规划</h2><p class="text-xs text-ink-500">千章小说的卷结构</p></div>
+        <button id="new-volume-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded-md text-sm transition">+ 新建卷</button>
+      </header>
+      <div id="volumes-list" class="p-6 space-y-3"></div>
+    </section>
+
+    <!-- 章节列表 -->
+    <section id="tab-chapters" class="tab-pane flex-1 overflow-y-auto scrollbar hidden">
+      <header class="px-6 py-3 border-b border-ink-200 flex items-center justify-between paper-bg sticky top-0 z-10 flex-wrap gap-2">
+        <div><h2 class="text-base font-bold text-ink-900">章节列表</h2><p class="text-xs text-ink-500" id="chapter-count">-</p></div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <select id="volume-filter" class="ink-input border border-ink-300 rounded px-2 py-1 text-sm bg-white"><option value="">全部卷</option></select>
+          <input id="chapter-search" type="text" placeholder="搜索标题..." class="ink-input w-32 border border-ink-300 rounded px-2 py-1 text-sm bg-white">
+          <button id="prev-page" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-1 rounded text-sm">‹</button>
+          <span id="page-info" class="text-xs text-ink-500 px-1">1-50</span>
+          <button id="next-page" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-1 rounded text-sm">›</button>
+        </div>
+      </header>
+      <div id="chapters-list" class="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+    </section>
+
+    <!-- 世界设定 -->
     <section id="tab-settings" class="tab-pane flex-1 overflow-y-auto scrollbar hidden">
-      <header class="px-8 py-4 border-b border-ink-200 paper-bg sticky top-0 z-10">
-        <h2 class="text-lg font-bold text-ink-900">世界设定</h2>
-        <p class="text-xs text-ink-500">世界观 · 角色 · 伏笔</p>
-      </header>
-      <div class="p-8 space-y-8 max-w-5xl">
-
-        <!-- 世界观 -->
-        <div class="paper-bg border border-ink-200 rounded-lg p-6">
-          <h3 class="font-xiaowei text-xl text-ink-900 mb-4 flex items-center gap-2">
-            <span>🌍</span> 世界观
-          </h3>
-          <div id="world-info" class="text-sm text-ink-700 space-y-2">加载中...</div>
+      <header class="px-6 py-3 border-b border-ink-200 paper-bg sticky top-0 z-10"><h2 class="text-base font-bold text-ink-900">世界设定</h2><p class="text-xs text-ink-500">世界观 · 角色 · 伏笔</p></header>
+      <div class="p-6 space-y-8 max-w-5xl">
+        <div class="paper-bg border border-ink-200 rounded-lg p-5">
+          <div class="flex items-center justify-between mb-4"><h3 class="font-xiaowei text-lg text-ink-900 flex items-center gap-2"><span>🌍</span> 世界观</h3><button id="edit-world-btn" class="text-xs text-ink-500 hover:text-vermilion-600">编辑</button></div>
+          <div id="world-info" class="text-sm text-ink-700"></div>
         </div>
-
-        <!-- 角色 -->
-        <div>
-          <h3 class="font-xiaowei text-xl text-ink-900 mb-4 flex items-center gap-2">
-            <span>🎭</span> 角色列表
-          </h3>
-          <div id="characters-list" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div class="text-ink-400">加载中...</div>
-          </div>
-        </div>
-
-        <!-- 伏笔 -->
-        <div>
-          <h3 class="font-xiaowei text-xl text-ink-900 mb-4 flex items-center gap-2">
-            <span>🪤</span> 伏笔矩阵
-          </h3>
-          <div id="foreshadows-list" class="space-y-2">
-            <div class="text-ink-400">加载中...</div>
-          </div>
-        </div>
+        <div><h3 class="font-xiaowei text-lg text-ink-900 mb-4 flex items-center gap-2"><span>🎭</span> 角色列表</h3><div id="characters-list" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div></div>
+        <div><div class="flex items-center justify-between mb-4"><h3 class="font-xiaowei text-lg text-ink-900 flex items-center gap-2"><span>🪤</span> 伏笔矩阵</h3><button id="new-foreshadow-btn" class="text-xs bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-1 rounded">+ 埋伏笔</button></div><div id="foreshadows-list" class="space-y-2"></div></div>
       </div>
     </section>
-
   </main>
 </div>
-
+<div id="toast-container" class="fixed top-4 right-4 z-[100] space-y-2"></div>
+<div id="modal-container"></div>
 <script>
 const API = '/api/v1';
 const OPENAI_API = '/v1';
+const state = { models: [], currentModel: '', messages: [], volumes: [], volumeFilter: '', chapterSearch: '', chapterRange: { start: 1, end: 50 }, pageSize: 50 };
 
-// ========== 工具函数 ==========
-async function api(path, options = {}) {
-  const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
+// Toast
+function toast(msg, type, duration) {
+  type = type || 'info'; duration = duration || 3000;
+  const colors = { success: 'bg-bamboo-500', error: 'bg-vermilion-500', info: 'bg-ink-700', warn: 'bg-gold-500' };
+  const icons = { success: '✓', error: '✕', info: 'ℹ', warn: '⚠' };
+  const div = document.createElement('div');
+  div.className = 'toast-item ' + (colors[type]||colors.info) + ' text-white px-4 py-3 rounded-lg shadow-lg text-sm flex items-center gap-2 max-w-sm';
+  div.innerHTML = '<span class="font-bold">' + (icons[type]||icons.info) + '</span><span>' + escapeHtml(msg) + '</span>';
+  document.getElementById('toast-container').appendChild(div);
+  setTimeout(function() { div.style.opacity='0'; div.style.transform='translateX(100%)'; div.style.transition='all 0.3s'; setTimeout(function(){div.remove();}, 300); }, duration);
+}
+
+// Modal
+function showModal(html) {
+  document.getElementById('modal-container').innerHTML = '<div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" id="modal-overlay"><div class="bg-white rounded-lg max-w-lg w-full max-h-[85vh] overflow-y-auto scrollbar slide-up">' + html + '</div></div>';
+  document.getElementById('modal-overlay').addEventListener('click', function(e) { if (e.target.id === 'modal-overlay') closeModal(); });
+}
+function closeModal() { document.getElementById('modal-container').innerHTML = ''; }
+function confirmDialog(title, msg) {
+  return new Promise(function(resolve) {
+    showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-2">' + escapeHtml(title) + '</h3><p class="text-sm text-ink-600 mb-6">' + escapeHtml(msg) + '</p><div class="flex justify-end gap-3"><button id="confirm-no" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="confirm-yes" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">确认</button></div></div>');
+    document.getElementById('confirm-yes').addEventListener('click', function() { closeModal(); resolve(true); });
+    document.getElementById('confirm-no').addEventListener('click', function() { closeModal(); resolve(false); });
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
-  }
+}
+
+function escapeHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = escapeHtml(text);
+  html = html.replace(/```([\s\S]*?)```/g, function(m,c){ return '<pre>'+c.trim()+'</pre>'; });
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>[\s\S]*?<\/li>)/g, '<ul>$1</ul>');
+  html = html.replace(/\n/g, '<br>');
+  html = html.replace(/<br>(<ul>)/g, '$1').replace(/(<\/ul>)<br>/g, '$1');
+  html = html.replace(/<pre>([\s\S]*?)<\/pre>/g, function(m,c){ return '<pre>'+c.replace(/<br>/g,'\n')+'</pre>'; });
+  return html;
+}
+function skeletonCard() { return '<div class="paper-bg border border-ink-200 rounded-lg p-4"><div class="skeleton h-4 w-1/3 mb-3"></div><div class="skeleton h-3 w-full mb-2"></div><div class="skeleton h-3 w-2/3"></div></div>'; }
+
+async function api(path, options) {
+  options = options || {};
+  const res = await fetch(API + path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options));
+  if (!res.ok) { const err = await res.json().catch(function(){ return {detail: res.statusText}; }); throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)); }
   return res.status === 204 ? null : res.json();
 }
 
-function renderMarkdown(text) {
-  if (!text) return '';
-  return text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
-    .replace(/`([^`]+)`/g, '<code class="bg-ink-100 px-1 rounded text-vermilion-700">$1</code>')
-    .replace(/^## (.+)$/gm, '<h3 class="font-bold text-ink-900 mt-3 mb-1">$1</h3>')
-    .replace(/^### (.+)$/gm, '<h4 class="font-bold text-ink-800 mt-2 mb-1">$1</h4>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br>');
-}
-
-function escapeHtml(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// ========== 状态检查 ==========
 async function checkStatus() {
   try {
     const data = await api('/status');
     document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-bamboo-500';
     document.getElementById('status-text').textContent = '已连接';
     document.getElementById('novel-info').textContent = data.novel_title || data.title || '墨流';
-    return true;
-  } catch {
+  } catch(e) {
     document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-vermilion-500';
-    document.getElementById('status-text').textContent = '后端未连接';
-    return false;
+    document.getElementById('status-text').textContent = '未连接';
   }
 }
 
-// ========== 模型加载 ==========
+// 模型
 async function loadModels() {
   try {
     const res = await fetch(OPENAI_API + '/models');
     const data = await res.json();
     const sel = document.getElementById('model-select');
     sel.innerHTML = '';
-    if (!data.data || data.data.length === 0) {
-      sel.innerHTML = '<option value="">无可用模型</option>';
-      return;
-    }
-    data.data.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = m.name || m.id;
-      sel.appendChild(opt);
-    });
-  } catch (e) {
-    document.getElementById('model-select').innerHTML = '<option value="">加载失败</option>';
-  }
+    state.models = data.data || [];
+    if (state.models.length === 0) { sel.innerHTML = '<option value="">无可用模型</option>'; return; }
+    state.models.forEach(function(m) { const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.name || m.id; sel.appendChild(opt); });
+    state.currentModel = state.models[0].id;
+    updateModelDesc();
+  } catch(e) { document.getElementById('model-select').innerHTML = '<option value="">加载失败</option>'; }
 }
+function updateModelDesc() {
+  const m = state.models.find(function(x){ return x.id === state.currentModel; });
+  document.getElementById('model-desc').textContent = (m && m.description) || '选择助手模型开始创作';
+}
+document.getElementById('model-select').addEventListener('change', function(e) { state.currentModel = e.target.value; updateModelDesc(); });
 
-// ========== 对话创作 ==========
+// 对话
 const chatBox = document.getElementById('chat-messages');
 const chatInput = document.getElementById('chat-input');
 const sendBtn = document.getElementById('send-btn');
 
 function addMessage(role, text) {
   const div = document.createElement('div');
-  div.className = `fade-in flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+  div.className = 'fade-in flex ' + (role === 'user' ? 'justify-end' : 'justify-start');
   const inner = document.createElement('div');
-  inner.className = `${role === 'user' ? 'msg-user' : 'msg-ai'} rounded-lg p-4 max-w-3xl text-sm leading-relaxed`;
+  inner.className = (role === 'user' ? 'msg-user' : 'msg-ai') + ' rounded-lg p-4 max-w-3xl text-sm leading-relaxed';
   inner.innerHTML = role === 'user' ? escapeHtml(text).replace(/\n/g, '<br>') : renderMarkdown(text);
-  div.appendChild(inner);
-  chatBox.appendChild(div);
-  chatBox.scrollTop = chatBox.scrollHeight;
+  div.appendChild(inner); chatBox.appendChild(div); chatBox.scrollTop = chatBox.scrollHeight;
   return inner;
 }
-
+function addStreamingMessage() {
+  const div = document.createElement('div');
+  div.className = 'fade-in flex justify-start';
+  div.innerHTML = '<div class="msg-ai rounded-lg p-4 max-w-3xl text-sm leading-relaxed streaming-cursor" id="streaming-msg"></div>';
+  chatBox.appendChild(div); chatBox.scrollTop = chatBox.scrollHeight;
+  return document.getElementById('streaming-msg');
+}
 function addTyping() {
   const div = document.createElement('div');
-  div.id = 'typing-indicator';
-  div.className = 'flex justify-start fade-in';
-  div.innerHTML = `<div class="msg-ai rounded-lg p-4 max-w-3xl">
-    <div class="flex gap-1"><span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span>
-    <span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span>
-    <span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span></div></div>`;
-  chatBox.appendChild(div);
-  chatBox.scrollTop = chatBox.scrollHeight;
+  div.id = 'typing-indicator'; div.className = 'flex justify-start fade-in';
+  div.innerHTML = '<div class="msg-ai rounded-lg p-4 max-w-3xl"><div class="flex gap-1 items-center"><span class="text-xs text-ink-400 mr-2">正在思考</span><span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span><span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span><span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span></div></div>';
+  chatBox.appendChild(div); chatBox.scrollTop = chatBox.scrollHeight;
 }
 
 async function sendMessage() {
   const text = chatInput.value.trim();
-  const model = document.getElementById('model-select').value;
-  if (!text || !model) return;
-
+  if (!text) return;
+  if (!state.currentModel) { toast('请先选择模型', 'warn'); return; }
+  state.messages.push({ role: 'user', content: text });
   addMessage('user', text);
-  chatInput.value = '';
-  sendBtn.disabled = true;
-  addTyping();
-
+  chatInput.value = ''; sendBtn.disabled = true; addTyping();
+  let streamEl = null; let fullText = '';
   try {
     const res = await fetch(OPENAI_API + '/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: model,
-        messages: [{ role: 'user', content: text }],
-        stream: false,
-      }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: state.currentModel, messages: state.messages, stream: true })
     });
-    document.getElementById('typing-indicator')?.remove();
-
+    const typing = document.getElementById('typing-indicator'); if (typing) typing.remove();
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
-      addMessage('assistant', `❌ **请求失败**\n\n\`\`\`\n${err.error?.message || JSON.stringify(err)}\n\`\`\``);
-    } else {
-      const data = await res.json();
-      addMessage('assistant', data.choices?.[0]?.message?.content || '(空响应)');
+      const err = await res.json().catch(function(){ return { error: { message: res.statusText } }; });
+      addMessage('assistant', '## ❌ 请求失败\n\n```\n' + (err.error?.message || JSON.stringify(err)) + '\n```');
+      state.messages.pop(); return;
     }
-  } catch (e) {
-    document.getElementById('typing-indicator')?.remove();
-    addMessage('assistant', `❌ **网络错误**\n\n\`\`\`\n${e.message}\n\`\`\``);
-  } finally {
-    sendBtn.disabled = false;
-    chatInput.focus();
-  }
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    streamEl = addStreamingMessage();
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const lines = buffer.split('\n'); buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+        try { const json = JSON.parse(data); const delta = json.choices?.[0]?.delta?.content; if (delta) { fullText += delta; streamEl.innerHTML = renderMarkdown(fullText); chatBox.scrollTop = chatBox.scrollHeight; } } catch(e) {}
+      }
+    }
+    if (streamEl) streamEl.classList.remove('streaming-cursor');
+    if (!fullText && streamEl) streamEl.innerHTML = '<span class="text-ink-400">(空响应)</span>';
+    state.messages.push({ role: 'assistant', content: fullText });
+  } catch(e) {
+    const typing = document.getElementById('typing-indicator'); if (typing) typing.remove();
+    if (streamEl) { streamEl.classList.remove('streaming-cursor'); if (!fullText) streamEl.remove(); }
+    addMessage('assistant', '## ❌ 网络错误\n\n```\n' + e.message + '\n```');
+    state.messages.pop(); toast('网络错误: ' + e.message, 'error');
+  } finally { sendBtn.disabled = false; chatInput.focus(); }
 }
-
 sendBtn.addEventListener('click', sendMessage);
-chatInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-});
-document.getElementById('clear-chat').addEventListener('click', () => {
-  chatBox.innerHTML = '';
+chatInput.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
+document.getElementById('clear-chat').addEventListener('click', async function() {
+  if (state.messages.length === 0) return;
+  const ok = await confirmDialog('清空对话', '确定清空所有对话历史？');
+  if (!ok) return;
+  state.messages = [];
+  chatBox.innerHTML = '<div class="msg-ai rounded-lg p-5 max-w-3xl mx-auto fade-in"><p class="text-sm text-ink-700 leading-relaxed"><span class="font-brush text-vermilion-600 text-xl">對話已清空。</span> 開始新的創作吧。</p></div>';
+  toast('对话已清空', 'success');
 });
 
-// ========== 卷宗规划 ==========
+// 卷宗
 async function loadVolumes() {
   const list = document.getElementById('volumes-list');
+  list.innerHTML = skeletonCard() + skeletonCard();
   try {
     const vols = await api('/volumes');
+    state.volumes = vols;
+    const vf = document.getElementById('volume-filter');
+    vf.innerHTML = '<option value="">全部卷</option>' + vols.map(function(v){ return '<option value="'+v.id+'">卷'+v.id+' '+escapeHtml(v.name)+'</option>'; }).join('');
     if (vols.length === 0) {
-      list.innerHTML = '<div class="text-center text-ink-400 py-12">还没有卷，点击右上角创建</div>';
+      list.innerHTML = '<div class="text-center py-16"><div class="text-4xl mb-3">📜</div><p class="text-ink-400 mb-4">还没有卷</p><button onclick="openVolumeModal()" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded-md text-sm">创建第一卷</button></div>';
       return;
     }
-    list.innerHTML = vols.map(v => {
-      const statusMap = { completed: '✅ 已完成', active: '🔵 进行中', planned: '⚪ 规划中' };
-      const statusColor = { completed: 'text-bamboo-600', active: 'text-ink-700', planned: 'text-ink-400' };
+    const statusMap = { completed: '✅ 已完成', active: '🔵 进行中', planned: '⚪ 规划中' };
+    const statusColor = { completed: 'text-bamboo-600 bg-bamboo-500/10', active: 'text-ink-700 bg-ink-500/10', planned: 'text-ink-400 bg-ink-100' };
+    list.innerHTML = vols.map(function(v) {
       const chCount = v.chapter_end - v.chapter_start + 1;
-      return `
-        <div class="paper-bg border border-ink-200 rounded-lg p-5 hover:shadow-md transition">
-          <div class="flex items-start justify-between">
-            <div class="flex-1">
-              <div class="flex items-center gap-3 mb-2">
-                <span class="seal text-sm">卷${v.id}</span>
-                <h3 class="font-xiaowei text-lg text-ink-900">${escapeHtml(v.name)}</h3>
-              </div>
-              <p class="text-sm text-ink-600 mb-2">${escapeHtml(v.summary || '暂无摘要')}</p>
-              <div class="text-xs text-ink-500 flex gap-4">
-                <span>📄 第 ${v.chapter_start}-${v.chapter_end} 章</span>
-                <span>📝 共 ${chCount} 章</span>
-                <span class="${statusColor[v.status]}">${statusMap[v.status] || v.status}</span>
-              </div>
-            </div>
-            <button data-del-vol="${v.id}" class="text-ink-400 hover:text-vermilion-600 text-sm px-2">删</button>
-          </div>
-        </div>`;
+      return '<div class="paper-bg border border-ink-200 rounded-lg p-5 hover:shadow-md transition cursor-pointer" onclick="openVolumeModal('+v.id+')"><div class="flex items-start justify-between"><div class="flex-1 min-w-0"><div class="flex items-center gap-3 mb-2"><span class="seal text-sm">卷'+v.id+'</span><h3 class="font-xiaowei text-lg text-ink-900 truncate">'+escapeHtml(v.name)+'</h3></div><p class="text-sm text-ink-600 mb-3 line-clamp-2">'+escapeHtml(v.summary || '暂无摘要')+'</p><div class="flex items-center gap-3 flex-wrap"><span class="text-xs text-ink-500 bg-ink-50 px-2 py-1 rounded">📄 第 '+v.chapter_start+'-'+v.chapter_end+' 章</span><span class="text-xs text-ink-500 bg-ink-50 px-2 py-1 rounded">📝 '+chCount+' 章</span><span class="text-xs px-2 py-1 rounded cursor-pointer '+(statusColor[v.status]||statusColor.planned)+'" onclick="event.stopPropagation(); cycleVolumeStatus('+v.id+', \''+v.status+'\')">'+(statusMap[v.status]||v.status)+'</span></div></div><button onclick="event.stopPropagation(); confirmDeleteVolume('+v.id+', \''+escapeHtml(v.name).replace(/'/g,"\\'")+'\')" class="text-ink-400 hover:text-vermilion-600 text-sm px-2 ml-2">删</button></div></div>';
     }).join('');
-
-    list.querySelectorAll('[data-del-vol]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!confirm('确认删除该卷？')) return;
-        try { await api(`/volumes/${btn.dataset.delVol}`, { method: 'DELETE' }); loadVolumes(); }
-        catch (e) { alert('删除失败: ' + e.message); }
-      });
-    });
-  } catch (e) {
-    list.innerHTML = `<div class="text-center text-vermilion-600 py-12">加载失败: ${e.message}</div>`;
-  }
+  } catch(e) { list.innerHTML = '<div class="text-center text-vermilion-600 py-12">加载失败: '+escapeHtml(e.message)+'</div>'; }
 }
 
-document.getElementById('new-volume-btn').addEventListener('click', async () => {
-  const name = prompt('卷名：');
-  if (!name) return;
-  const range = prompt('章节范围（起-止，如 31-80）：', '31-80');
-  if (!range) return;
-  const m = range.match(/(\d+)\s*-\s*(\d+)/);
-  if (!m) { alert('格式错误'); return; }
-  const summary = prompt('摘要（可选）：', '') || '';
+window.openVolumeModal = function(volId) {
+  const vol = volId ? state.volumes.find(function(v){ return v.id === volId; }) : null;
+  const isEdit = !!vol;
+  showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-4">'+(isEdit?'编辑卷':'新建卷')+'</h3><div class="space-y-4"><div><label class="text-xs text-ink-500 block mb-1">卷名 *</label><input id="vol-name" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+(vol?escapeHtml(vol.name):'')+'" placeholder="例：功德币风云"></div><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">起始章 *</label><input id="vol-start" type="number" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+(vol?vol.chapter_start:1)+'"></div><div><label class="text-xs text-ink-500 block mb-1">结束章 *</label><input id="vol-end" type="number" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+(vol?vol.chapter_end:30)+'"></div></div><div><label class="text-xs text-ink-500 block mb-1">摘要</label><textarea id="vol-summary" rows="3" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none" placeholder="本卷主要情节...">'+(vol?escapeHtml(vol.summary):'')+'</textarea></div>'+(isEdit?'<div><label class="text-xs text-ink-500 block mb-1">状态</label><select id="vol-status" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="planned" '+(vol.status==='planned'?'selected':'')+'>⚪ 规划中</option><option value="active" '+(vol.status==='active'?'selected':'')+'>🔵 进行中</option><option value="completed" '+(vol.status==='completed'?'selected':'')+'>✅ 已完成</option></select></div>':'')+'</div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-vol-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">'+(isEdit?'保存':'创建')+'</button></div></div>');
+  document.getElementById('save-vol-btn').addEventListener('click', async function() {
+    const name = document.getElementById('vol-name').value.trim();
+    const start = parseInt(document.getElementById('vol-start').value);
+    const end = parseInt(document.getElementById('vol-end').value);
+    const summary = document.getElementById('vol-summary').value.trim();
+    if (!name) { toast('请填卷名', 'warn'); return; }
+    if (!start || !end || start > end) { toast('章节范围有误', 'warn'); return; }
+    try {
+      if (isEdit) {
+        const status = document.getElementById('vol-status').value;
+        await api('/volumes/'+volId, { method: 'PUT', body: JSON.stringify({ name: name, chapter_start: start, chapter_end: end, summary: summary, status: status }) });
+        toast('卷已更新', 'success');
+      } else {
+        await api('/volumes', { method: 'POST', body: JSON.stringify({ name: name, chapter_start: start, chapter_end: end, summary: summary }) });
+        toast('卷已创建', 'success');
+      }
+      closeModal(); loadVolumes();
+    } catch(e) { toast('保存失败: ' + e.message, 'error'); }
+  });
+};
+window.confirmDeleteVolume = async function(id, name) {
+  const ok = await confirmDialog('删除卷', '确认删除「'+name+'」？此操作不可撤销。');
+  if (!ok) return;
+  try { await api('/volumes/'+id, { method: 'DELETE' }); toast('已删除', 'success'); loadVolumes(); }
+  catch(e) { toast('删除失败: ' + e.message, 'error'); }
+};
+window.cycleVolumeStatus = async function(id, current) {
+  const next = { planned: 'active', active: 'completed', completed: 'planned' }[current] || 'planned';
+  try { await api('/volumes/'+id, { method: 'PUT', body: JSON.stringify({ status: next }) }); loadVolumes(); toast('状态已更新', 'success', 1500); }
+  catch(e) { toast('更新失败: ' + e.message, 'error'); }
+};
+document.getElementById('new-volume-btn').addEventListener('click', function() { openVolumeModal(); });
+
+// 章节
+async function loadChapters() {
+  const list = document.getElementById('chapters-list');
+  list.innerHTML = Array(6).fill(skeletonCard()).join('');
+  const start = state.chapterRange.start, end = state.chapterRange.end;
+  const volParam = state.volumeFilter ? '&volume_id='+state.volumeFilter : '';
   try {
-    await api('/volumes', {
-      method: 'POST',
-      body: JSON.stringify({
-        name, chapter_start: parseInt(m[1]), chapter_end: parseInt(m[2]), summary
-      }),
-    });
-    loadVolumes();
-  } catch (e) { alert('创建失败: ' + e.message); }
+    const data = await api('/chapters?start='+start+'&end='+end+volParam);
+    let chapters = data.chapters || [];
+    if (state.chapterSearch) chapters = chapters.filter(function(c){ return c.title && c.title.includes(state.chapterSearch); });
+    document.getElementById('chapter-count').textContent = '共 '+data.total+' 章'+(state.volumeFilter?'（当前卷）':'');
+    document.getElementById('page-info').textContent = start+'-'+end;
+    if (chapters.length === 0) { list.innerHTML = '<div class="text-center py-16 col-span-full"><div class="text-4xl mb-3">📭</div><p class="text-ink-400">该范围无章节</p></div>'; return; }
+    const emotionColor = { '紧张':'border-vermilion-500', '悲伤':'border-ink-400', '轻松':'border-bamboo-500', '兴奋':'border-gold-500', '愤怒':'border-vermilion-600', '温馨':'border-gold-400' };
+    const emotionBg = { '紧张':'bg-vermilion-500/10', '悲伤':'bg-ink-400/10', '轻松':'bg-bamboo-500/10', '兴奋':'bg-gold-500/10' };
+    list.innerHTML = chapters.map(function(ch) {
+      return '<div class="chapter-card paper-bg border-l-4 '+(emotionColor[ch.emotion]||'border-ink-300')+' border-y border-r border-ink-200 rounded p-4" onclick="showChapterDetail('+ch.chapter_num+')"><div class="flex items-baseline justify-between mb-1"><span class="font-brush text-vermilion-700 text-lg">第'+ch.chapter_num+'章</span>'+(ch.volume_id?'<span class="text-xs text-ink-400 bg-ink-50 px-1.5 py-0.5 rounded">卷'+ch.volume_id+'</span>':'')+'</div><h4 class="text-sm font-medium text-ink-800 line-clamp-2 mb-2">'+escapeHtml(ch.title)+'</h4>'+(ch.key_events&&ch.key_events.length?'<div class="text-xs text-ink-500 line-clamp-2 mb-2">📌 '+escapeHtml(ch.key_events.slice(0,2).join('；'))+'</div>':'')+'<div class="text-xs text-ink-400 flex gap-3"><span>📊 '+ch.word_count+'字</span>'+(ch.emotion?'<span class="'+(emotionBg[ch.emotion]||'')+' px-1.5 rounded">🎭 '+escapeHtml(ch.emotion)+'</span>':'')+'</div></div>';
+    }).join('');
+  } catch(e) { list.innerHTML = '<div class="text-center text-vermilion-600 py-12 col-span-full">加载失败: '+escapeHtml(e.message)+'</div>'; }
+}
+window.showChapterDetail = async function(chNum) {
+  try {
+    const ch = await api('/chapters/'+chNum);
+    showModal('<div class="flex flex-col max-h-[85vh]"><div class="px-6 py-4 border-b border-ink-200 flex items-center justify-between"><div><h3 class="font-brush text-2xl text-vermilion-700">第'+ch.chapter_num+'章</h3><p class="text-sm text-ink-600 mt-1">'+escapeHtml(ch.title)+'</p></div><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600 text-xl">×</button></div><div class="px-6 py-4 overflow-y-auto scrollbar flex-1"><div class="text-xs text-ink-500 flex gap-4 mb-4 pb-3 border-b border-ink-100 flex-wrap"><span>📊 '+ch.word_count+'字</span>'+(ch.emotion?'<span>🎭 '+escapeHtml(ch.emotion)+'</span>':'')+(ch.volume_id?'<span>📖 卷'+ch.volume_id+'</span>':'')+'</div>'+(ch.summary?'<div class="bg-ink-50 rounded p-3 mb-4 text-sm text-ink-700"><b>摘要：</b>'+escapeHtml(ch.summary)+'</div>':'')+(ch.key_events&&ch.key_events.length?'<div class="mb-4 text-sm"><b class="text-ink-700">关键事件：</b><ul class="mt-1 text-ink-600">'+ch.key_events.map(function(e){ return '<li>• '+escapeHtml(e)+'</li>'; }).join('')+'</ul></div>':'')+'<div class="text-ink-800 leading-relaxed whitespace-pre-wrap text-sm">'+(escapeHtml(ch.content)||'<span class="text-ink-400">（无正文）</span>')+'</div></div></div>');
+  } catch(e) { toast('加载失败: ' + e.message, 'error'); }
+};
+document.getElementById('volume-filter').addEventListener('change', function(e) { state.volumeFilter = e.target.value; state.chapterRange = { start: 1, end: 50 }; loadChapters(); });
+document.getElementById('chapter-search').addEventListener('input', function(e) { state.chapterSearch = e.target.value.trim(); loadChapters(); });
+document.getElementById('prev-page').addEventListener('click', function() {
+  if (state.chapterRange.start <= 1) { toast('已是第一页', 'info', 1500); return; }
+  const start = Math.max(1, state.chapterRange.start - state.pageSize);
+  state.chapterRange = { start: start, end: start + state.pageSize - 1 };
+  loadChapters();
+});
+document.getElementById('next-page').addEventListener('click', function() {
+  state.chapterRange = { start: state.chapterRange.end + 1, end: state.chapterRange.end + state.pageSize };
+  loadChapters();
 });
 
-// ========== 章节列表 ==========
-async function loadChapters() {
-  const start = parseInt(document.getElementById('chapter-start').value) || 1;
-  const end = parseInt(document.getElementById('chapter-end').value) || 50;
-  const list = document.getElementById('chapters-list');
-  list.innerHTML = '<div class="text-center text-ink-400 py-12 col-span-full">加载中...</div>';
-  try {
-    const data = await api(`/chapters?start=${start}&end=${end}`);
-    document.getElementById('chapter-count').textContent = `共 ${data.total} 章`;
-    if (data.chapters.length === 0) {
-      list.innerHTML = '<div class="text-center text-ink-400 py-12 col-span-full">该范围无章节</div>';
-      return;
-    }
-    list.innerHTML = data.chapters.map(ch => {
-      const emotionColor = {
-        '紧张': 'border-vermilion-500', '悲伤': 'border-ink-400',
-        '轻松': 'border-bamboo-500', '兴奋': 'border-gold-500',
-      }[ch.emotion] || 'border-ink-200';
-      return `
-        <div class="chapter-card paper-bg border-l-4 ${emotionColor} border-y border-r border-ink-200 rounded p-4"
-             data-ch="${ch.chapter_num}">
-          <div class="flex items-baseline justify-between mb-1">
-            <span class="font-brush text-vermilion-700 text-lg">第${ch.chapter_num}章</span>
-            ${ch.volume_id ? `<span class="text-xs text-ink-400">卷${ch.volume_id}</span>` : ''}
-          </div>
-          <h4 class="text-sm font-medium text-ink-800 line-clamp-2 mb-2">${escapeHtml(ch.title)}</h4>
-          <div class="text-xs text-ink-500 flex gap-3">
-            <span>📊 ${ch.word_count}字</span>
-            ${ch.emotion ? `<span>🎭 ${escapeHtml(ch.emotion)}</span>` : ''}
-          </div>
-        </div>`;
-    }).join('');
-
-    list.querySelectorAll('[data-ch]').forEach(card => {
-      card.addEventListener('click', () => showChapterDetail(parseInt(card.dataset.ch)));
-    });
-  } catch (e) {
-    list.innerHTML = `<div class="text-center text-vermilion-600 py-12 col-span-full">加载失败: ${e.message}</div>`;
-  }
-}
-
-async function showChapterDetail(chNum) {
-  try {
-    const ch = await api(`/chapters/${chNum}`);
-    const html = `
-      <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-8" id="ch-modal">
-        <div class="bg-white rounded-lg max-w-3xl w-full max-h-[85vh] flex flex-col">
-          <div class="px-6 py-4 border-b border-ink-200 flex items-center justify-between">
-            <h3 class="font-brush text-2xl text-vermilion-700">第${ch.chapter_num}章 · ${escapeHtml(ch.title)}</h3>
-            <button id="close-modal" class="text-ink-400 hover:text-vermilion-600 text-xl">×</button>
-          </div>
-          <div class="px-6 py-4 overflow-y-auto scrollbar flex-1">
-            <div class="text-xs text-ink-500 flex gap-4 mb-4 pb-3 border-b border-ink-100">
-              <span>📊 ${ch.word_count}字</span>
-              ${ch.emotion ? `<span>🎭 ${escapeHtml(ch.emotion)}</span>` : ''}
-              ${ch.volume_id ? `<span>📖 卷${ch.volume_id}</span>` : ''}
-            </div>
-            ${ch.summary ? `<div class="bg-ink-50 rounded p-3 mb-4 text-sm text-ink-700">${escapeHtml(ch.summary)}</div>` : ''}
-            <div class="prose prose-sm max-w-none text-ink-800 leading-relaxed whitespace-pre-wrap">${escapeHtml(ch.content)}</div>
-          </div>
-        </div>
-      </div>`;
-    document.body.insertAdjacentHTML('beforeend', html);
-    document.getElementById('close-modal').addEventListener('click', () => document.getElementById('ch-modal').remove());
-    document.getElementById('ch-modal').addEventListener('click', (e) => {
-      if (e.target.id === 'ch-modal') e.target.remove();
-    });
-  } catch (e) { alert('加载失败: ' + e.message); }
-}
-
-document.getElementById('load-chapters').addEventListener('click', loadChapters);
-
-// ========== 世界设定 ==========
+// 世界设定
 async function loadSettings() {
-  // 世界观
   try {
     const w = await api('/world');
-    document.getElementById('world-info').innerHTML = `
-      <div class="grid grid-cols-2 gap-4">
-        <div><span class="text-ink-400">世界名：</span>${escapeHtml(w.world_name) || '-'}</div>
-        <div><span class="text-ink-400">时代：</span>${escapeHtml(w.era) || '-'}</div>
-        <div><span class="text-ink-400">类型：</span>${escapeHtml(w.genre) || '-'}</div>
-      </div>
-      ${w.summary ? `<div class="mt-3 pt-3 border-t border-ink-100"><span class="text-ink-400">摘要：</span>${escapeHtml(w.summary)}</div>` : ''}
-      ${w.key_constraints?.length ? `<div class="mt-2"><span class="text-ink-400">约束：</span>${w.key_constraints.map(c => `<span class="inline-block bg-ink-100 rounded px-2 py-0.5 mr-1 mb-1 text-xs">${escapeHtml(c)}</span>`).join('')}</div>` : ''}
-    `;
-  } catch (e) {
-    document.getElementById('world-info').innerHTML = `<span class="text-vermilion-600">加载失败</span>`;
-  }
-
-  // 角色
+    document.getElementById('world-info').innerHTML = (w.world_name||w.era||w.summary) ? '<div class="grid grid-cols-2 gap-4 mb-3">'+(w.world_name?'<div><span class="text-ink-400 text-xs">世界名</span><div class="text-ink-800">'+escapeHtml(w.world_name)+'</div></div>':'')+(w.era?'<div><span class="text-ink-400 text-xs">时代</span><div class="text-ink-800">'+escapeHtml(w.era)+'</div></div>':'')+(w.genre?'<div><span class="text-ink-400 text-xs">类型</span><div class="text-ink-800">'+escapeHtml(w.genre)+'</div></div>':'')+'</div>'+(w.summary?'<div class="mt-3 pt-3 border-t border-ink-100"><span class="text-ink-400 text-xs">摘要</span><div class="text-ink-700 mt-1">'+escapeHtml(w.summary)+'</div></div>':'')+(w.key_constraints&&w.key_constraints.length?'<div class="mt-2"><span class="text-ink-400 text-xs">约束</span><div class="mt-1 flex flex-wrap gap-1">'+w.key_constraints.map(function(c){ return '<span class="inline-block bg-ink-100 rounded px-2 py-0.5 text-xs text-ink-600">'+escapeHtml(c)+'</span>'; }).join('')+'</div></div>':'') : '<span class="text-ink-400">未设置世界观</span>';
+  } catch(e) { document.getElementById('world-info').innerHTML = '<span class="text-vermilion-600">加载失败</span>'; }
   try {
     const chars = await api('/characters');
     const cl = document.getElementById('characters-list');
-    if (chars.length === 0) {
-      cl.innerHTML = '<div class="text-ink-400">无角色</div>';
-    } else {
-      cl.innerHTML = chars.map(c => `
-        <div class="paper-bg border border-ink-200 rounded-lg p-4">
-          <h4 class="font-xiaowei text-lg text-ink-900 mb-1">${escapeHtml(c.name)}</h4>
-          <p class="text-xs text-ink-600 mb-3">${escapeHtml(c.one_line_pitch)}</p>
-          <div class="text-xs text-ink-500 space-y-1">
-            ${c.core_desire ? `<div>🎯 <span class="text-ink-400">核心欲望：</span>${escapeHtml(c.core_desire)}</div>` : ''}
-            ${c.current_goal ? `<div>📍 <span class="text-ink-400">当前目标：</span>${escapeHtml(c.current_goal)}</div>` : ''}
-            ${c.current_emotion ? `<div>🎭 <span class="text-ink-400">情绪：</span>${escapeHtml(c.current_emotion)}</div>` : ''}
-          </div>
-        </div>`).join('');
-    }
-  } catch (e) {
-    document.getElementById('characters-list').innerHTML = `<div class="text-vermilion-600">加载失败</div>`;
-  }
-
-  // 伏笔
+    if (chars.length === 0) { cl.innerHTML = '<div class="text-ink-400 col-span-full text-center py-8">无角色数据</div>'; }
+    else { cl.innerHTML = chars.map(function(c){ return '<div class="paper-bg border border-ink-200 rounded-lg p-4 hover:shadow-sm transition cursor-pointer" onclick="openCharacterModal(\''+escapeHtml(c.name).replace(/'/g,"\\'")+'\')"><h4 class="font-xiaowei text-lg text-ink-900 mb-1">'+escapeHtml(c.name)+'</h4><p class="text-xs text-ink-600 mb-3 line-clamp-2">'+escapeHtml(c.one_line_pitch||'')+'</p><div class="text-xs text-ink-500 space-y-1">'+(c.core_desire?'<div>🎯 <span class="text-ink-400">核心：</span>'+escapeHtml(c.core_desire)+'</div>':'')+(c.current_goal?'<div>📍 <span class="text-ink-400">目标：</span>'+escapeHtml(c.current_goal)+'</div>':'')+(c.current_emotion?'<div>🎭 <span class="text-ink-400">情绪：</span>'+escapeHtml(c.current_emotion)+'</div>':'')+'</div></div>'; }).join(''); }
+  } catch(e) { document.getElementById('characters-list').innerHTML = '<div class="text-vermilion-600">加载失败</div>'; }
   try {
     const fs = await api('/foreshadows');
     const fl = document.getElementById('foreshadows-list');
-    if (fs.length === 0) {
-      fl.innerHTML = '<div class="text-ink-400">无伏笔</div>';
-    } else {
-      const statusMap = {
-        planted: '<span class="text-gold-600">● 已埋</span>',
-        building: '<span class="text-ink-700">● 推进中</span>',
-        paid: '<span class="text-bamboo-600">● 已回收</span>',
-      };
+    if (fs.length === 0) { fl.innerHTML = '<div class="text-ink-400 text-center py-8">无伏笔</div>'; }
+    else {
+      const statusMap = { planted: { label: '● 已埋', color: 'text-gold-600 bg-gold-500/10' }, building: { label: '● 推进中', color: 'text-ink-700 bg-ink-500/10' }, paid: { label: '● 已回收', color: 'text-bamboo-600 bg-bamboo-500/10' } };
       const typeIcon = { mystery: '🔍', character: '👤', object: '📦', world: '🌍' };
-      fl.innerHTML = fs.map(f => `
-        <div class="paper-bg border border-ink-200 rounded p-3 flex items-start gap-3">
-          <span class="text-lg">${typeIcon[f.type] || '❓'}</span>
-          <div class="flex-1">
-            <div class="flex items-center justify-between">
-              <span class="text-sm text-ink-800">${escapeHtml(f.description)}</span>
-              ${statusMap[f.status] || f.status}
-            </div>
-            <div class="text-xs text-ink-400 mt-1">
-              第${f.planted_chapter}章埋 ${f.paid_chapter ? `· 第${f.paid_chapter}章收` : ''}
-              ${f.notes ? `· ${escapeHtml(f.notes)}` : ''}
-            </div>
-          </div>
-        </div>`).join('');
+      fl.innerHTML = fs.map(function(f) {
+        const st = statusMap[f.status] || statusMap.planted;
+        return '<div class="paper-bg border border-ink-200 rounded p-3 flex items-start gap-3 hover:shadow-sm transition"><span class="text-lg flex-shrink-0">'+(typeIcon[f.type]||'❓')+'</span><div class="flex-1 min-w-0"><div class="flex items-center justify-between gap-2"><span class="text-sm text-ink-800">'+escapeHtml(f.description)+'</span><div class="flex items-center gap-1 flex-shrink-0"><span class="text-xs px-2 py-0.5 rounded cursor-pointer '+st.color+'" onclick="cycleForeshadowStatus('+f.id+', \''+f.status+'\')">'+st.label+'</span><button onclick="openForeshadowModal('+f.id+')" class="text-ink-400 hover:text-vermilion-600 text-xs px-1">编</button><button onclick="confirmDeleteForeshadow('+f.id+')" class="text-ink-400 hover:text-vermilion-600 text-xs px-1">删</button></div></div><div class="text-xs text-ink-400 mt-1">第'+(f.planted_chapter||'?')+'章埋 '+(f.paid_chapter?'· 第'+f.paid_chapter+'章收':'')+(f.notes?' · '+escapeHtml(f.notes):'')+(f.priority==='high'?'<span class="text-vermilion-500 ml-1">★高优</span>':'')+'</div></div></div>';
+      }).join('');
     }
-  } catch (e) {
-    document.getElementById('foreshadows-list').innerHTML = `<div class="text-vermilion-600">加载失败</div>`;
-  }
+  } catch(e) { document.getElementById('foreshadows-list').innerHTML = '<div class="text-vermilion-600">加载失败</div>'; }
 }
 
-// ========== 标签切换 ==========
-const tabs = ['chat', 'volumes', 'chapters', 'settings'];
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const tab = btn.dataset.tab;
-    document.querySelectorAll('.tab-btn').forEach(b => {
-      b.classList.toggle('active', b.dataset.tab === tab);
-      b.classList.toggle('text-ink-600', b.dataset.tab !== tab);
-    });
-    tabs.forEach(t => {
-      const pane = document.getElementById('tab-' + t);
-      if (pane) pane.classList.toggle('hidden', t !== tab);
-    });
-    // 懒加载
-    if (tab === 'volumes') loadVolumes();
-    if (tab === 'chapters' && !document.getElementById('chapters-list').dataset.loaded) {
-      document.getElementById('chapters-list').dataset.loaded = '1';
-      loadChapters();
-    }
-    if (tab === 'settings') loadSettings();
+// 世界观编辑
+document.getElementById('edit-world-btn').addEventListener('click', async function() {
+  let w = {};
+  try { w = await api('/world'); } catch(e) {}
+  showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-4">编辑世界观</h3><div class="space-y-4"><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">世界名</label><input id="w-name" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.world_name||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">时代</label><input id="w-era" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.era||'')+'"></div></div><div><label class="text-xs text-ink-500 block mb-1">类型</label><input id="w-genre" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.genre||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">约束（逗号分隔）</label><input id="w-constraints" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml((w.key_constraints||[]).join(', '))+'"></div><div><label class="text-xs text-ink-500 block mb-1">摘要</label><textarea id="w-summary" rows="4" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none">'+escapeHtml(w.summary||'')+'</textarea></div></div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-world-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">保存</button></div></div>');
+  document.getElementById('save-world-btn').addEventListener('click', async function() {
+    try {
+      const constraints = document.getElementById('w-constraints').value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+      await api('/world', { method: 'PUT', body: JSON.stringify({ world_name: document.getElementById('w-name').value, era: document.getElementById('w-era').value, genre: document.getElementById('w-genre').value, key_constraints: constraints, summary: document.getElementById('w-summary').value }) });
+      toast('世界观已保存', 'success'); closeModal(); loadSettings();
+    } catch(e) { toast('保存失败: ' + e.message, 'error'); }
   });
 });
 
-// ========== 启动 ==========
-(async function init() {
-  await checkStatus();
-  await loadModels();
-})();
+// 角色编辑
+window.openCharacterModal = async function(name) {
+  try {
+    const c = await api('/characters/'+name);
+    showModal('<div class="p-6"><h3 class="font-xiaowei text-xl text-ink-900 mb-1">'+escapeHtml(c.name)+'</h3><p class="text-xs text-ink-500 mb-4">'+escapeHtml(c.one_line_pitch||'')+'</p><div class="space-y-4"><div class="bg-ink-50 rounded p-3 text-xs space-y-1">'+(c.core_desire?'<div><b class="text-ink-600">核心欲望：</b>'+escapeHtml(c.core_desire)+'</div>':'')+(c.surface_desire?'<div><b class="text-ink-600">表层欲望：</b>'+escapeHtml(c.surface_desire)+'</div>':'')+(c.deep_fear?'<div><b class="text-ink-600">深层恐惧：</b>'+escapeHtml(c.deep_fear)+'</div>':'')+'</div><div><label class="text-xs text-ink-500 block mb-1">当前位置</label><input id="c-location" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(c.current_location||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">当前目标</label><input id="c-goal" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(c.current_goal||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">当前情绪</label><input id="c-emotion" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(c.current_emotion||'')+'"></div></div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-char-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">保存</button></div></div>');
+    document.getElementById('save-char-btn').addEventListener('click', async function() {
+      try { await api('/characters/'+name, { method: 'PUT', body: JSON.stringify({ current_location: document.getElementById('c-location').value, current_goal: document.getElementById('c-goal').value, current_emotion: document.getElementById('c-emotion').value }) }); toast('角色已更新', 'success'); closeModal(); loadSettings(); }
+      catch(e) { toast('保存失败: ' + e.message, 'error'); }
+    });
+  } catch(e) { toast('加载失败: ' + e.message, 'error'); }
+};
+
+// 伏笔管理
+window.openForeshadowModal = async function(id) {
+  const isEdit = !!id; let f = {};
+  if (isEdit) { try { const list = await api('/foreshadows'); f = list.find(function(x){ return x.id === id; }) || {}; } catch(e) {} }
+  showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-4">'+(isEdit?'编辑伏笔':'埋入伏笔')+'</h3><div class="space-y-4"><div><label class="text-xs text-ink-500 block mb-1">描述 *</label><textarea id="f-desc" rows="2" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none" placeholder="伏笔内容...">'+escapeHtml(f.description||'')+'</textarea></div><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">类型</label><select id="f-type" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="mystery" '+(f.type==='mystery'?'selected':'')+'>🔍 悬疑</option><option value="character" '+(f.type==='character'?'selected':'')+'>👤 角色</option><option value="object" '+(f.type==='object'?'selected':'')+'>📦 物品</option><option value="world" '+(f.type==='world'?'selected':'')+'>🌍 世界</option></select></div><div><label class="text-xs text-ink-500 block mb-1">优先级</label><select id="f-priority" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="normal" '+(f.priority==='normal'?'selected':'')+'>普通</option><option value="high" '+(f.priority==='high'?'selected':'')+'>★ 高优</option><option value="low" '+(f.priority==='low'?'selected':'')+'>低</option></select></div></div><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">埋入章节</label><input id="f-planted" type="number" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+(f.planted_chapter||'')+'"></div>'+(isEdit?'<div><label class="text-xs text-ink-500 block mb-1">回收章节</label><input id="f-paid" type="number" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+(f.paid_chapter||'')+'"></div>':'')+'</div>'+(isEdit?'<div><label class="text-xs text-ink-500 block mb-1">状态</label><select id="f-status" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="planted" '+(f.status==='planted'?'selected':'')+'>已埋</option><option value="building" '+(f.status==='building'?'selected':'')+'>推进中</option><option value="paid" '+(f.status==='paid'?'selected':'')+'>已回收</option></select></div>':'')+'<div><label class="text-xs text-ink-500 block mb-1">备注</label><input id="f-notes" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(f.notes||'')+'"></div></div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-f-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">'+(isEdit?'保存':'创建')+'</button></div></div>');
+  document.getElementById('save-f-btn').addEventListener('click', async function() {
+    const desc = document.getElementById('f-desc').value.trim();
+    if (!desc) { toast('请填描述', 'warn'); return; }
+    const body = { description: desc, type: document.getElementById('f-type').value, priority: document.getElementById('f-priority').value, planted_chapter: parseInt(document.getElementById('f-planted').value)||0, notes: document.getElementById('f-notes').value };
+    try {
+      if (isEdit) { body.status = document.getElementById('f-status').value; body.paid_chapter = parseInt(document.getElementById('f-paid').value)||0; await api('/foreshadows/'+id, { method: 'PUT', body: JSON.stringify(body) }); toast('伏笔已更新', 'success'); }
+      else { await api('/foreshadows', { method: 'POST', body: JSON.stringify(body) }); toast('伏笔已创建', 'success'); }
+      closeModal(); loadSettings();
+    } catch(e) { toast('保存失败: ' + e.message, 'error'); }
+  });
+};
+window.cycleForeshadowStatus = async function(id, current) {
+  const next = { planted: 'building', building: 'paid', paid: 'planted' }[current] || 'planted';
+  try { const body = { status: next }; await api('/foreshadows/'+id, { method: 'PUT', body: JSON.stringify(body) }); toast('状态已更新', 'success', 1500); loadSettings(); }
+  catch(e) { toast('更新失败: ' + e.message, 'error'); }
+};
+window.confirmDeleteForeshadow = async function(id) {
+  const ok = await confirmDialog('删除伏笔', '确认删除该伏笔？');
+  if (!ok) return;
+  try { await api('/foreshadows/'+id, { method: 'DELETE' }); toast('已删除', 'success'); loadSettings(); }
+  catch(e) { toast('删除失败: ' + e.message, 'error'); }
+};
+document.getElementById('new-foreshadow-btn').addEventListener('click', function() { openForeshadowModal(); });
+
+// 标签切换
+const tabs = ['chat', 'volumes', 'chapters', 'settings'];
+document.querySelectorAll('.tab-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === tab); b.classList.toggle('text-ink-600', b.dataset.tab !== tab); });
+    tabs.forEach(function(t) { const pane = document.getElementById('tab-'+t); if (pane) pane.classList.toggle('hidden', t !== tab); });
+    if (tab === 'volumes') loadVolumes();
+    if (tab === 'chapters' && !document.getElementById('chapters-list').dataset.loaded) { document.getElementById('chapters-list').dataset.loaded = '1'; loadChapters(); }
+    if (tab === 'settings') loadSettings();
+    // 移动端关闭侧边栏
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('show');
+  });
+});
+
+// 移动端侧边栏
+document.getElementById('open-sidebar').addEventListener('click', function() { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebar-overlay').classList.add('show'); });
+document.getElementById('close-sidebar').addEventListener('click', function() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('show'); });
+document.getElementById('sidebar-overlay').addEventListener('click', function() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('show'); });
+
+// 启动
+(async function init() { await checkStatus(); await loadModels(); })();
 </script>
 </body>
 </html>
