@@ -281,6 +281,51 @@ async def restore_chapter(request: Request, chapter_num: int, body: dict):
     return {"ok": True, "chapter_num": chapter_num, "restored_version": target_version}
 
 
+# --- 上下文预览 ---
+
+@router.get("/chapters/{chapter_num}/context")
+async def get_chapter_context(request: Request, chapter_num: int):
+    """预览生成第 N 章时将装配的上下文（不实际生成）
+
+    返回：弧方向、角色状态、到期伏笔、约束、前章摘要、上一章收尾
+    """
+    cfg = request.app.state.config
+    from moliu.cli.utils import load_characters, load_world, load_narrator
+    from moliu.context.assembler import StructuredAssembler
+    from moliu.data.schemas import WorldSetting
+
+    try:
+        all_chars = load_characters(cfg)
+        world = load_world(cfg) or WorldSetting()
+        narrator = load_narrator(cfg)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"加载数据失败: {e}")
+
+    try:
+        assembler = StructuredAssembler(cfg)
+        ctx = await assembler.assemble(
+            chapter_num, "", all_chars, world,
+            narrator=narrator, last_emotion="轻松",
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"上下文装配失败: {e}")
+
+    # 卷归属
+    vol_id = _get_volume_for_chapter(cfg.resolve_data_dir(), chapter_num)
+
+    return {
+        "chapter_num": chapter_num,
+        "volume_id": vol_id,
+        "arc_direction": ctx.arc_direction,
+        "character_snapshots": ctx.character_snapshots,
+        "due_foreshadows": ctx.due_foreshadows,
+        "constraints": ctx.constraints,
+        "recent_chapters_full": ctx.recent_chapters_full[:2000] + ("..." if len(ctx.recent_chapters_full) > 2000 else ""),
+        "last_300_words": ctx.last_300_words,
+        "recent_chars_count": len(ctx.recent_chapters_full),
+    }
+
+
 # --- 章节生成 ---
 
 class GenerateResponse(BaseModel):

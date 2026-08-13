@@ -109,8 +109,11 @@ class StructuredAssembler:
 
         ctx.last_300_words = self._load_last_300_words(chapter_num)
 
-        # 图谱反向注入（墨脉图）
-        ctx.graph_insights = await self.inject_graph_context(chapter_num, characters)
+        # 图谱反向注入（墨脉图）— 失败时优雅降级，不阻断装配
+        try:
+            ctx.graph_insights = await self.inject_graph_context(chapter_num, characters)
+        except Exception as e:
+            logger.warning("图谱注入失败，跳过: %s", e)
 
         return ctx
 

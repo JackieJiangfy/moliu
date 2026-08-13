@@ -123,6 +123,7 @@ tailwind.config = {
       <header class="px-6 py-3 border-b border-ink-200 flex items-center justify-between paper-bg">
         <div><h2 class="text-base font-bold text-ink-900">对话创作</h2><p id="model-desc" class="text-xs text-ink-500 mt-0.5">选择助手模型开始创作</p></div>
         <div class="flex items-center gap-2">
+          <button id="smart-gen-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-2 rounded-md text-sm transition flex items-center gap-1"><span>🪄</span><span>智能生成</span></button>
           <select id="model-select" class="ink-input border border-ink-300 rounded-md px-3 py-2 text-sm bg-white max-w-[200px]"><option value="">加载中...</option></select>
           <button id="clear-chat" class="text-xs text-ink-500 hover:text-vermilion-600 px-2 py-2">清空</button>
         </div>
@@ -555,6 +556,94 @@ document.querySelectorAll('.tab-btn').forEach(function(btn) {
 document.getElementById('open-sidebar').addEventListener('click', function() { document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebar-overlay').classList.add('show'); });
 document.getElementById('close-sidebar').addEventListener('click', function() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('show'); });
 document.getElementById('sidebar-overlay').addEventListener('click', function() { document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebar-overlay').classList.remove('show'); });
+
+// 智能生成 Modal
+window.openGenerateModal = function() {
+  showModal('<div class="p-6" style="min-width:700px"><div class="flex items-center justify-between mb-4"><h3 class="font-bold text-lg text-ink-900">🪄 智能章节生成</h3><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600 text-xl">×</button></div><div class="space-y-4"><div><label class="text-xs text-ink-500 block mb-1">章节号</label><div class="flex gap-2"><input id="gen-ch-num" type="number" class="ink-input flex-1 border border-ink-300 rounded px-3 py-2 text-sm bg-white" placeholder="例：126" value="126"><button id="load-ctx-btn" class="bg-ink-700 hover:bg-ink-800 text-white px-4 py-2 rounded text-sm whitespace-nowrap">加载上下文</button></div></div><div id="ctx-preview" class="hidden space-y-3"></div><div id="gen-input-area" class="hidden space-y-3"><div><label class="text-xs text-ink-500 block mb-1">节拍（一句话描述本章发生的事）*</label><textarea id="gen-beat" rows="2" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none" placeholder="例：沈夜发现验钞机56%的真相"></textarea></div><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">情绪</label><select id="gen-emotion" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"><option value="轻松">轻松</option><option value="紧张">紧张</option><option value="悲伤">悲伤</option><option value="兴奋">兴奋</option><option value="愤怒">愤怒</option><option value="温馨">温馨</option></select></div><div class="flex items-end"><button id="run-gen-btn" class="w-full bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded text-sm font-medium">开始生成</button></div></div></div><div id="gen-result-area" class="hidden"></div></div></div>');
+  document.getElementById('load-ctx-btn').addEventListener('click', loadGenContext);
+  document.getElementById('run-gen-btn').addEventListener('click', runSmartGenerate);
+};
+
+async function loadGenContext() {
+  const chNum = parseInt(document.getElementById('gen-ch-num').value);
+  if (!chNum) { toast('请输入章节号', 'warn'); return; }
+  const preview = document.getElementById('ctx-preview');
+  preview.classList.remove('hidden');
+  preview.innerHTML = '<div class="skeleton h-4 w-full mb-2"></div><div class="skeleton h-4 w-3/4 mb-2"></div><div class="skeleton h-4 w-1/2"></div>';
+  try {
+    const ctx = await api('/chapters/'+chNum+'/context');
+    let html = '';
+    if (ctx.volume_id) html += '<div class="text-xs"><span class="bg-ink-100 text-ink-700 px-2 py-1 rounded">📖 卷'+ctx.volume_id+'</span></div>';
+    if (ctx.arc_direction) html += '<details class="border border-ink-200 rounded"><summary class="text-xs font-medium text-ink-700 px-3 py-2 cursor-pointer hover:bg-ink-50">🧭 故事方向</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-ink-100">'+escapeHtml(ctx.arc_direction)+'</div></details>';
+    if (ctx.character_snapshots) html += '<details class="border border-ink-200 rounded"><summary class="text-xs font-medium text-ink-700 px-3 py-2 cursor-pointer hover:bg-ink-50">🎭 角色状态</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-ink-100">'+escapeHtml(ctx.character_snapshots)+'</div></details>';
+    if (ctx.due_foreshadows) html += '<details class="border border-vermilion-500/30 rounded"><summary class="text-xs font-medium text-vermilion-700 px-3 py-2 cursor-pointer hover:bg-vermilion-500/5">🪤 到期伏笔提醒</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-vermilion-500/20">'+escapeHtml(ctx.due_foreshadows)+'</div></details>';
+    if (ctx.constraints) html += '<details class="border border-ink-200 rounded"><summary class="text-xs font-medium text-ink-700 px-3 py-2 cursor-pointer hover:bg-ink-50">⚠️ 本章约束</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-ink-100">'+escapeHtml(ctx.constraints)+'</div></details>';
+    if (ctx.last_300_words) html += '<details class="border border-ink-200 rounded"><summary class="text-xs font-medium text-ink-700 px-3 py-2 cursor-pointer hover:bg-ink-50">📜 上一章收尾（300字）</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-ink-100">'+escapeHtml(ctx.last_300_words)+'</div></details>';
+    if (ctx.recent_chapters_full) html += '<details class="border border-ink-200 rounded"><summary class="text-xs font-medium text-ink-700 px-3 py-2 cursor-pointer hover:bg-ink-50">📚 前3章原文（'+ctx.recent_chars_count+'字，预览2000字）</summary><div class="px-3 py-2 text-xs text-ink-600 whitespace-pre-wrap border-t border-ink-100 max-h-60 overflow-y-auto scrollbar">'+escapeHtml(ctx.recent_chapters_full)+'</div></details>';
+    if (!html) html = '<div class="text-xs text-ink-400 text-center py-4">无可用上下文</div>';
+    preview.innerHTML = html;
+    document.getElementById('gen-input-area').classList.remove('hidden');
+    toast('上下文已加载', 'success', 1500);
+  } catch(e) {
+    preview.innerHTML = '<div class="text-xs text-vermilion-600">加载失败: '+escapeHtml(e.message)+'</div>';
+  }
+}
+
+async function runSmartGenerate() {
+  const chNum = parseInt(document.getElementById('gen-ch-num').value);
+  const beat = document.getElementById('gen-beat').value.trim();
+  const emotion = document.getElementById('gen-emotion').value;
+  if (!chNum) { toast('请输入章节号', 'warn'); return; }
+  if (!beat) { toast('请输入节拍', 'warn'); return; }
+
+  const resultArea = document.getElementById('gen-result-area');
+  resultArea.classList.remove('hidden');
+  resultArea.innerHTML = '<div class="bg-ink-50 rounded-lg p-4"><div class="flex items-center gap-2 text-sm text-ink-600 mb-2"><span class="typing-dot w-2 h-2 bg-vermilion-500 rounded-full"></span><span class="typing-dot w-2 h-2 bg-vermilion-500 rounded-full"></span><span class="typing-dot w-2 h-2 bg-vermilion-500 rounded-full"></span><span>正在生成第 '+chNum+' 章...</span></div><div id="gen-stream" class="text-xs text-ink-500"></div></div>';
+
+  const streamEl = document.getElementById('gen-stream');
+  const inputArea = document.getElementById('gen-input-area');
+  inputArea.classList.add('hidden');
+
+  let fullText = '';
+  try {
+    const res = await fetch(OPENAI_API + '/chat/completions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'moliu-chapter-generator',
+        messages: [{ role: 'user', content: '生成第'+chNum+'章\n节拍：'+beat+'\n情绪：'+emotion }],
+        stream: true
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(function(){ return { error: { message: res.statusText } }; });
+      resultArea.innerHTML = '<div class="bg-vermilion-500/10 border border-vermilion-500/30 rounded-lg p-4 text-sm text-vermilion-700">❌ 生成失败: '+(err.error?.message||JSON.stringify(err))+'</div>';
+      inputArea.classList.remove('hidden');
+      return;
+    }
+    const reader = res.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      const lines = buffer.split('\n'); buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
+        try { const json = JSON.parse(data); const delta = json.choices?.[0]?.delta?.content; if (delta) { fullText += delta; streamEl.innerHTML = renderMarkdown(fullText); resultArea.scrollTop = resultArea.scrollHeight; } } catch(e) {}
+      }
+    }
+    // 生成完成，显示完整结果 + 操作按钮
+    resultArea.innerHTML = '<div class="bg-white border border-ink-200 rounded-lg p-4"><div class="flex items-center justify-between mb-3 pb-2 border-b border-ink-100"><span class="text-sm font-medium text-ink-700">✅ 第'+chNum+'章生成完成</span><div class="flex gap-2"><button id="copy-result-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">复制</button><button id="close-after-gen-btn" class="text-xs bg-vermilion-100 hover:bg-vermilion-200 text-vermilion-700 px-2 py-1 rounded">关闭</button></div></div><div class="text-sm text-ink-800 max-h-96 overflow-y-auto scrollbar">'+renderMarkdown(fullText)+'</div></div>';
+    document.getElementById('copy-result-btn').addEventListener('click', function() { navigator.clipboard.writeText(fullText); toast('已复制到剪贴板', 'success', 1500); });
+    document.getElementById('close-after-gen-btn').addEventListener('click', closeModal);
+    toast('章节生成完成', 'success');
+  } catch(e) {
+    resultArea.innerHTML = '<div class="bg-vermilion-500/10 border border-vermilion-500/30 rounded-lg p-4 text-sm text-vermilion-700">❌ 网络错误: '+escapeHtml(e.message)+'</div>';
+    inputArea.classList.remove('hidden');
+  }
+}
+document.getElementById('smart-gen-btn').addEventListener('click', function() { openGenerateModal(); });
 
 // 启动
 (async function init() { await checkStatus(); await loadModels(); })();
