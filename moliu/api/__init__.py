@@ -6,6 +6,8 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 from moliu.config import Config
 
@@ -45,6 +47,16 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(characters.router, prefix="/api/v1", tags=["角色"])
     app.include_router(world.router, prefix="/api/v1", tags=["世界观"])
     app.include_router(foreshadows.router, prefix="/api/v1", tags=["伏笔"])
+
+    # 静态文件（前端页面）
+    static_dir = Path(__file__).resolve().parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    # 根路径重定向到看板
+    @app.get("/")
+    async def root():
+        return RedirectResponse(url="/static/dashboard.html")
 
     return app
 

@@ -1,0 +1,45 @@
+{
+  "说明": "OpenWebUI 配置参考 — 手动设置用",
+  "custom_navigation": [
+    {
+      "id": "moliu-dashboard",
+      "label": "📊 故事看板",
+      "icon": "bar-chart",
+      "url": "http://localhost:8000/static/dashboard.html",
+      "target": "iframe"
+    },
+    {
+      "id": "moliu-volumes",
+      "label": "📖 卷规划",
+      "icon": "book",
+      "url": "http://localhost:8000/static/volumes.html",
+      "target": "iframe"
+    },
+    {
+      "id": "moliu-generator",
+      "label": "✏️ 生成章节",
+      "icon": "edit",
+      "url": "http://localhost:8000/static/generator.html",
+      "target": "iframe"
+    },
+    {
+      "id": "moliu-api",
+      "label": "📋 API 文档",
+      "icon": "code",
+      "url": "http://localhost:8000/docs",
+      "target": "iframe"
+    }
+  ],
+  "env_vars": {
+    "WEBUI_CUSTOM_NAVIGATION": "JSON 字符串，内容同上",
+    "WEBUI_ALLOW_IFRAME": "true",
+    "MOLIU_API_URL": "http://moliu-api:8000（Docker 内）或 http://localhost:8000（宿主机）"
+  },
+  "pipelines": {
+    "说明": "将 pipelines/ 目录下的 .py 文件放入 OpenWebUI 的 pipelines 目录",
+    "模型列表": [
+      "📝 章节生成助手 — 对话式生成章节",
+      "📐 大纲规划助手 — 规划卷结构"
+    ]
+  }
+}
