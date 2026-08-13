@@ -194,6 +194,10 @@ tailwind.config = {
       <header class="px-6 py-3 border-b border-ink-200 flex items-center justify-between paper-bg">
         <div><h2 class="text-base font-bold text-ink-900">关系图谱</h2><p class="text-xs text-ink-500" id="graph-info">角色关系力导向图</p></div>
         <div class="flex items-center gap-2">
+          <input id="graph-search" type="text" placeholder="搜索角色名..." class="ink-input border border-ink-300 rounded-md px-3 py-2 text-sm bg-white w-40">
+          <button id="graph-save-layout-btn" title="保存当前布局" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-2 rounded-md text-sm">💾</button>
+          <button id="graph-reset-layout-btn" title="重置布局" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-2 rounded-md text-sm">🎯</button>
+          <button id="graph-export-btn" title="导出图片" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-2 rounded-md text-sm">📷</button>
           <button id="graph-rel-btn" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-2 rounded-md text-sm">关系列表</button>
           <button id="graph-new-rel-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-2 rounded-md text-sm">+ 新建关系</button>
           <button id="graph-refresh-btn" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-2 rounded-md text-sm">↻</button>
@@ -712,12 +716,20 @@ document.getElementById('sidebar-overlay').addEventListener('click', function() 
 let graphChart = null;
 let graphData = null;
 let relTypesCache = [];
+const GRAPH_POS_KEY = 'moliu_graph_positions';
+
+function getSavedPositions() {
+  try { return JSON.parse(localStorage.getItem(GRAPH_POS_KEY) || '{}'); } catch(e) { return {}; }
+}
+
+function savePositions(positions) {
+  localStorage.setItem(GRAPH_POS_KEY, JSON.stringify(positions));
+}
 
 async function loadGraph() {
   const canvas = document.getElementById('graph-canvas');
   if (!canvas) return;
   try {
-    // 加载关系类型缓存（首次）
     if (relTypesCache.length === 0) {
       relTypesCache = await api('/relationships/types');
     }
@@ -743,10 +755,12 @@ function renderGraph(data) {
 
   const categoryColors = { positive: '#6b8e4e', neutral: '#8a7960', negative: '#c8453c' };
   const roleColors = { main: '#c8453c', support: '#ff7d00', villain: '#722ed1', minor: '#86909c', neutral: '#16599e' };
+  const savedPos = getSavedPositions();
+  const hasSavedLayout = Object.keys(savedPos).length > 0;
 
   const nodes = data.nodes.map(function(n) {
     const size = 30 + Math.min(n.relation_count * 6, 30);
-    return {
+    const node = {
       id: n.id, name: n.name,
       symbolSize: size,
       category: n.role_type || 'neutral',
@@ -754,6 +768,13 @@ function renderGraph(data) {
       label: { show: true, position: 'bottom', fontSize: 12, color: '#261d16' },
       rawData: n,
     };
+    // 恢复保存的位置
+    if (savedPos[n.name]) {
+      node.x = savedPos[n.name].x;
+      node.y = savedPos[n.name].y;
+      node.fixed = true;
+    }
+    return node;
   });
 
   const edges = data.edges.map(function(e) {
@@ -768,6 +789,8 @@ function renderGraph(data) {
 
   const categories = Object.keys(roleColors).map(function(k) { return { name: { main: '主角', support: '配角', villain: '反派', minor: '路人', neutral: '中立' }[k] || k }; });
 
+  // 有保存位置用 none 布局（固定），否则用 force 力导向
+  const layout = hasSavedLayout ? 'none' : 'force';
   graphChart.setOption({
     tooltip: {
       formatter: function(p) {
@@ -778,11 +801,11 @@ function renderGraph(data) {
     },
     legend: [{ data: categories.map(function(c) { return c.name; }), orient: 'vertical', right: 10, top: 20, textStyle: { fontSize: 11 } }],
     series: [{
-      type: 'graph', layout: 'force',
+      type: 'graph', layout: layout,
       data: nodes, links: edges,
       roam: true, draggable: true,
       label: { show: true, fontSize: 12, position: 'bottom' },
-      force: { repulsion: 300, edgeLength: [100, 250], gravity: 0.1 },
+      force: hasSavedLayout ? undefined : { repulsion: 300, edgeLength: [100, 250], gravity: 0.1 },
       emphasis: { focus: 'adjacency', lineStyle: { width: 4 }, label: { show: true } },
       lineStyle: { color: '#8a7960', opacity: 0.6, curveness: 0.2 },
     }]
@@ -795,6 +818,21 @@ function renderGraph(data) {
     } else if (params.dataType === 'edge' && params.data.rawData) {
       showEdgeDetail(params.data.rawData);
     }
+  });
+
+  // 拖拽后自动保存位置
+  graphChart.off('mouseup');
+  graphChart.on('mouseup', { dataType: 'node' }, function(params) {
+    const positions = getSavedPositions();
+    // ECharts 力导向布局拖拽后，位置在内部数据里
+    const opt = graphChart.getOption();
+    const seriesData = opt.series[0].data;
+    seriesData.forEach(function(n) {
+      if (n.name && n.x !== undefined) {
+        positions[n.name] = { x: n.x, y: n.y };
+      }
+    });
+    savePositions(positions);
   });
 
   window.addEventListener('resize', function() { if (graphChart) graphChart.resize(); });
@@ -909,6 +947,89 @@ window.confirmDeleteRelationship = async function(id) {
 
 document.getElementById('graph-new-rel-btn').addEventListener('click', function() { openRelationshipModal(); });
 document.getElementById('graph-refresh-btn').addEventListener('click', function() { loadGraph(); toast('已刷新', 'info', 1000); });
+
+// 搜索高亮
+document.getElementById('graph-search').addEventListener('input', function() {
+  if (!graphChart || !graphData) return;
+  const kw = this.value.trim().toLowerCase();
+  if (!kw) { renderGraph(graphData); return; }
+  // 找匹配节点
+  const matchedNames = new Set();
+  graphData.nodes.forEach(function(n) {
+    if (n.name.toLowerCase().includes(kw)) matchedNames.add(n.name);
+  });
+  if (matchedNames.size === 0) return;
+  // 更新节点样式：匹配高亮，其他变淡
+  const roleColors = { main: '#c8453c', support: '#ff7d00', villain: '#722ed1', minor: '#86909c', neutral: '#16599e' };
+  const savedPos = getSavedPositions();
+  const nodes = graphData.nodes.map(function(n) {
+    const size = 30 + Math.min(n.relation_count * 6, 30);
+    const isMatch = matchedNames.has(n.name);
+    const node = {
+      id: n.id, name: n.name,
+      symbolSize: isMatch ? size * 1.4 : size,
+      itemStyle: {
+        color: roleColors[n.role_type] || '#8a7960',
+        borderColor: isMatch ? '#ff7d00' : '#fff',
+        borderWidth: isMatch ? 4 : 2,
+        opacity: isMatch ? 1 : 0.25,
+        shadowBlur: isMatch ? 15 : 0,
+        shadowColor: isMatch ? 'rgba(255,125,0,0.6)' : 'transparent',
+      },
+      label: { show: isMatch, position: 'bottom', fontSize: 14, fontWeight: 'bold', color: '#261d16' },
+      rawData: n,
+    };
+    if (savedPos[n.name]) { node.x = savedPos[n.name].x; node.y = savedPos[n.name].y; node.fixed = true; }
+    return node;
+  });
+  graphChart.setOption({ series: [{ data: nodes }] });
+});
+
+// 保存布局
+document.getElementById('graph-save-layout-btn').addEventListener('click', function() {
+  if (!graphChart) { toast('图谱未加载', 'warn'); return; }
+  const opt = graphChart.getOption();
+  const seriesData = opt.series[0].data;
+  const positions = {};
+  let count = 0;
+  seriesData.forEach(function(n) {
+    if (n.name && n.x !== undefined && n.x !== null) {
+      positions[n.name] = { x: n.x, y: n.y };
+      count++;
+    }
+  });
+  if (count === 0) {
+    // 力导向布局可能没暴露 x/y，用 convertFromPixel 兜底
+    toast('暂无可保存的位置（力导向运动中，请先拖拽节点）', 'warn');
+    return;
+  }
+  savePositions(positions);
+  toast('布局已保存（' + count + ' 个节点）', 'success');
+});
+
+// 重置布局
+document.getElementById('graph-reset-layout-btn').addEventListener('click', async function() {
+  const ok = await confirmDialog('重置布局', '清除保存的节点位置，重新力导向排列？');
+  if (!ok) return;
+  localStorage.removeItem(GRAPH_POS_KEY);
+  if (graphData) renderGraph(graphData);
+  toast('布局已重置', 'success');
+});
+
+// 导出图片
+document.getElementById('graph-export-btn').addEventListener('click', function() {
+  if (!graphChart) { toast('图谱未加载', 'warn'); return; }
+  const url = graphChart.getDataURL({
+    type: 'png',
+    pixelRatio: 2,
+    backgroundColor: '#faf6f0',
+  });
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '关系图谱_' + new Date().toISOString().slice(0, 10) + '.png';
+  a.click();
+  toast('图片已导出', 'success');
+});
 
 // 智能生成 Modal
 window.openGenerateModal = function() {
