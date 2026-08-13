@@ -7,15 +7,15 @@
 <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #1a1a1a; min-height: 100vh; }
 .container { max-width: 1000px; margin: 0 auto; padding: 24px; }
 
 .header { margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
-.header h1 { font-size: 24px; font-weight: 700; color: #fff; }
+.header h1 { font-size: 24px; font-weight: 700; color: #1a1a1a; }
 .header-actions { display: flex; gap: 8px; }
 
-.btn { padding: 8px 20px; border: 1px solid #2a2a2a; border-radius: 8px; background: #1a1a1a; color: #e0e0e0; cursor: pointer; font-size: 14px; transition: all .2s; }
-.btn:hover { background: #2a2a2a; border-color: #3a3a3a; }
+.btn { padding: 8px 20px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; color: #1a1a1a; cursor: pointer; font-size: 14px; transition: all .2s; }
+.btn:hover { background: #f9fafb; }
 .btn.primary { background: #3b82f6; color: #fff; border-color: #3b82f6; }
 .btn.primary:hover { background: #2563eb; }
 .btn.danger { background: #ef4444; color: #fff; border-color: #ef4444; }
@@ -23,26 +23,26 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .btn.small { padding: 4px 12px; font-size: 12px; }
 
 /* 卷卡片 */
-.volume-card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+.volume-card { background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
 .volume-card .top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-.volume-card .name { font-size: 18px; font-weight: 600; color: #fff; }
-.volume-card .subtitle { color: #888; font-size: 13px; }
-.volume-card .range { font-size: 13px; color: #3b82f6; background: #3b82f622; padding: 2px 10px; border-radius: 12px; }
-.volume-card .summary { color: #aaa; font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
+.volume-card .name { font-size: 18px; font-weight: 600; color: #1a1a1a; }
+.volume-card .subtitle { color: #6b7280; font-size: 13px; }
+.volume-card .range { font-size: 13px; color: #3b82f6; background: #3b82f611; padding: 2px 10px; border-radius: 12px; }
+.volume-card .summary { color: #4b5563; font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
 .volume-card .status { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; }
-.volume-card .status.planned { background: #3b82f622; color: #3b82f6; }
-.volume-card .status.active { background: #10b98122; color: #10b981; }
-.volume-card .status.completed { background: #88888822; color: #888; }
+.volume-card .status.planned { background: #3b82f611; color: #3b82f6; }
+.volume-card .status.active { background: #10b98111; color: #10b981; }
+.volume-card .status.completed { background: #6b728011; color: #6b7280; }
 .volume-card .actions { display: flex; gap: 8px; margin-top: 12px; }
 
 /* 表单弹窗 */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 16px; padding: 28px; width: 90%; max-width: 520px; }
-.modal h2 { font-size: 20px; font-weight: 600; color: #fff; margin-bottom: 20px; }
+.modal { background: #fff; border: 1px solid #e0e0e0; border-radius: 16px; padding: 28px; width: 90%; max-width: 520px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.modal h2 { font-size: 20px; font-weight: 600; color: #1a1a1a; margin-bottom: 20px; }
 .form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 13px; color: #888; margin-bottom: 4px; }
-.form-group input, .form-group textarea { width: 100%; padding: 10px 12px; border: 1px solid #2a2a2a; border-radius: 8px; background: #111; color: #e0e0e0; font-size: 14px; font-family: inherit; }
-.form-group input:focus, .form-group textarea:focus { outline: none; border-color: #3b82f6; }
+.form-group label { display: block; font-size: 13px; color: #6b7280; margin-bottom: 4px; }
+.form-group input, .form-group textarea { width: 100%; padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 8px; background: #fff; color: #1a1a1a; font-size: 14px; font-family: inherit; }
+.form-group input:focus, .form-group textarea:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px #3b82f622; }
 .form-group textarea { min-height: 80px; resize: vertical; }
 .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 
