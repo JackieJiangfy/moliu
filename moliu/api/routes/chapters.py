@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from moliu.data.schemas import ChapterMeta
@@ -474,92 +473,3 @@ async def generate_chapter(request: Request, body: GenerateRequest):
         quality_report=qr.summary(),
         filepath=gen["filepath"],
     )
-
-
-@router.websocket("/generate/stream")
-async def generate_stream(ws: WebSocket):
-    """WebSocket 流式生成 — 实时推送生成进度"""
-    await ws.accept()
-    try:
-        # 等待客户端发送生成参数
-        data = await ws.receive_json()
-        chapter_num = data.get("chapter_num")
-        beat = data.get("beat", "")
-        emotion = data.get("emotion", "轻松")
-        characters_filter = data.get("characters", [])
-        chapter_type = data.get("chapter_type", "auto")
-        temperature = data.get("temperature")
-
-        if not chapter_num or not beat:
-            await ws.send_json({"type": "error", "message": "缺少 chapter_num 或 beat"})
-            await ws.close()
-            return
-
-        cfg = ws.app.state.config
-
-        # 1. Gatekeeper 校验
-        await ws.send_json({"type": "step", "step": "gatekeeper", "status": "running"})
-        from moliu.cli.utils import load_characters
-        all_chars = load_characters(cfg)
-        selected = [c for c in all_chars if c.name in characters_filter] if characters_filter else all_chars
-
-        gatekeeper = Gatekeeper(cfg)
-        gk = await gatekeeper.check(
-            chapter_num, selected,
-            beat=beat, emotion=emotion,
-            force_check=True,
-        )
-        if not gk.passed:
-            await ws.send_json({
-                "type": "gatekeeper_failed",
-                "missing_items": gk.missing_items,
-                "warnings": gk.warnings,
-            })
-            await ws.close()
-            return
-
-        await ws.send_json({"type": "step", "step": "gatekeeper", "status": "passed"})
-
-        # 2. 执行生成
-        await ws.send_json({"type": "step", "step": "generating", "status": "running"})
-        try:
-            gen = await _run_generation(
-                cfg,
-                chapter_num=chapter_num,
-                beat=beat,
-                emotion=emotion,
-                characters_filter=characters_filter,
-                chapter_type=chapter_type,
-                temperature=temperature,
-            )
-        except Exception as e:
-            await ws.send_json({"type": "error", "message": f"生成失败: {str(e)[:200]}"})
-            await ws.close()
-            return
-
-        result = gen["result"]
-        qr = gen["quality"]
-
-        # 3. 推送结果
-        await ws.send_json({
-            "type": "complete",
-            "chapter_num": result.chapter_num,
-            "word_count": result.word_count,
-            "tokens_used": result.tokens_used,
-            "content": result.content,
-            "quality_report": qr.summary(),
-            "filepath": gen["filepath"],
-        })
-
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        try:
-            await ws.send_json({"type": "error", "message": str(e)[:200]})
-        except Exception:
-            pass
-    finally:
-        try:
-            await ws.close()
-        except Exception:
-            pass

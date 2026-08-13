@@ -833,7 +833,7 @@ def serve(
     import uvicorn
     typer.echo(f"[OK] 启动墨流 API 服务器: http://{host}:{port}")
     typer.echo(f"  API 文档: http://localhost:{port}/docs")
-    typer.echo(f"  前端页面: http://localhost:{port}/static")
+    typer.echo(f"  OpenWebUI 连接: 在 OpenWebUI 设置 → 外部链接 → 添加 OpenAI 兼容 API → URL 填 http://host.docker.internal:{port}/v1")
     if reload:
         typer.echo("  热重载模式: 开启")
     uvicorn.run("moliu.api:app", host=host, port=port, reload=reload)

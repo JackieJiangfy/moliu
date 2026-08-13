@@ -1,54 +1,45 @@
 # 墨流 + OpenWebUI 部署配置
-# 同时启动 OpenWebUI 前端和墨流 FastAPI 后端
+#
+# 墨流后端在本地运行: python -m uvicorn moliu.api:app --host 0.0.0.0 --port 8000 --reload
+# OpenWebUI 通过 Docker 启动，通过 host.docker.internal 访问墨流后端
 #
 # 启动方式:
 #   docker compose up -d
 #
 # 访问:
-#   OpenWebUI: http://localhost:3000
-#   墨流 API:  http://localhost:8000
+#   OpenWebUI: http://localhost:3000  ← 主界面（聊天创作）
+#   墨流 API:  http://localhost:8000  ← 后端 API
 #   墨流看板:  http://localhost:8000/static/dashboard.html
+#
+# OpenWebUI 配置步骤（首次使用）:
+#   1. 访问 http://localhost:3000 注册管理员账号
+#   2. 管理员面板 → 设置 → 外部链接 → 添加 OpenAI 兼容 API
+#      - URL: http://host.docker.internal:8000/v1
+#      - API Key: moliu（随意填，墨流不校验）
+#      - 模型会自动出现: 📝 章节生成助手、📐 大纲规划助手、🔧 元数据回填助手
+#   3. 同时添加 DeepSeek API（用于实际 LLM 调用）
+#      - URL: https://api.deepseek.com/v1
+#      - API Key: 你的 DeepSeek API Key
+#   4. 在模型选择器中选择 "📝 章节生成助手" 开始对话创作
 
 version: "3.8"
 
 services:
-  # ==================== 墨流 FastAPI 后端 ====================
-  moliu-api:
-    image: python:3.11-slim
-    container_name: moliu-api
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    volumes:
-      # 挂载当前项目目录（包含 data/ 和 output/）
-      - .:/app
-    working_dir: /app
-    environment:
-      - MO_DEEPSEEK_API_KEY=${MO_DEEPSEEK_API_KEY:-}
-      - MO_DEEPSEEK_BASE_URL=${MO_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
-      - PYTHONUNBUFFERED=1
-    command: >
-      sh -c "pip install -e . --quiet 2>/dev/null &&
-             python -m uvicorn moliu.api:app --host 0.0.0.0 --port 8000"
-
-  # ==================== OpenWebUI 前端 ====================
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: openwebui
     restart: unless-stopped
     ports:
       - "3000:8080"
-    depends_on:
-      - moliu-api
     environment:
-      # 连接墨流后端
-      - MOLIU_API_URL=http://moliu-api:8000
-      # OpenWebUI 配置（通过 Admin Panel 手动配置 Pipelines）
-      # Pipelines 插件需要通过 OpenWebUI Admin Panel > 设置 > Pipelines 导入
+      # 允许注册（首次使用）
+      - WEBUI_AUTH=true
+      # 允许外部连接
+      - ENABLE_OLLAMA_API=false
     volumes:
       - openwebui-data:/app/backend/data
-      # 挂载 Pipelines 插件（通过 Admin Panel 导入）
-      - ./moliu/pipelines:/app/pipelines
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
   openwebui-data:
