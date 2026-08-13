@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>墨流 · 小说创作工作台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: {
+        serif: ['"Noto Serif SC"', 'serif'],
+        brush: ['"Ma Shan Zheng"', 'cursive'],
+        xiaowei: ['"ZCOOL XiaoWei"', 'serif'],
+      },
+      colors: {
+        ink: {
+          50: '#f7f5f2', 100: '#ede8e1', 200: '#dcd3c7',
+          300: '#c4b8a7', 400: '#a89880', 500: '#8a7960',
+          600: '#6f5e4a', 700: '#564636', 800: '#3d3025', 900: '#261d16',
+          950: '#17110c',
+        },
+        vermilion: { 500: '#c8453c', 600: '#a8392f', 700: '#8a2d26' },
+        bamboo: { 500: '#6b8e4e', 600: '#557340' },
+        gold: { 500: '#c9a961', 600: '#a88a45' },
+      },
+    },
+  },
+};
+</script>
+<style>
+  :root { --bg: #f7f5f2; --paper: #ffffff; --ink: #261d16; --ink-soft: #564636; --line: #dcd3c7; }
+  * { -webkit-font-smoothing: antialiased; }
+  body { font-family: 'Noto Serif SC', serif; background: var(--bg); color: var(--ink); }
+  .font-brush { font-family: 'Ma Shan Zheng', cursive; }
+  .font-xiaowei { font-family: 'ZCOOL XiaoWei', serif; }
+
+  /* 纸张纹理 */
+  .paper-bg {
+    background-color: var(--paper);
+    background-image: radial-gradient(circle at 20% 30%, rgba(138,121,96,0.04) 0%, transparent 40%),
+                      radial-gradient(circle at 80% 70%, rgba(138,121,96,0.03) 0%, transparent 40%);
+  }
+  .scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scrollbar::-webkit-scrollbar-thumb { background: #c4b8a7; border-radius: 3px; }
+  .scrollbar::-webkit-scrollbar-track { background: transparent; }
+
+  /* 印章 */
+  .seal {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #c8453c; color: #fff;
+    font-family: 'Ma Shan Zheng', cursive;
+    border-radius: 4px; padding: 2px 8px;
+    transform: rotate(-2deg);
+    box-shadow: 0 2px 8px rgba(200,69,60,0.3);
+    letter-spacing: 2px;
+  }
+
+  /* 聊天气泡 */
+  .msg-user { background: linear-gradient(135deg, #3d3025, #564636); color: #f7f5f2; }
+  .msg-ai {
+    background: #fff; border: 1px solid #ede8e1;
+    box-shadow: 0 1px 3px rgba(38,29,22,0.05);
+  }
+  .msg-ai pre {
+    background: #17110c; color: #ede8e1; padding: 12px;
+    border-radius: 6px; overflow-x: auto; margin: 8px 0;
+    font-family: 'Consolas', 'Noto Serif SC', monospace;
+    font-size: 13px;
+  }
+
+  /* 标签页 */
+  .tab-btn { transition: all 0.25s ease; position: relative; }
+  .tab-btn.active { color: #c8453c; }
+  .tab-btn.active::after {
+    content: ''; position: absolute; bottom: -1px; left: 50%;
+    transform: translateX(-50%); width: 24px; height: 2px;
+    background: #c8453c; border-radius: 1px;
+  }
+
+  /* 章节卡片 */
+  .chapter-card { transition: all 0.2s ease; cursor: pointer; }
+  .chapter-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(38,29,22,0.1); }
+
+  /* 输入框聚焦 */
+  .ink-input:focus { outline: none; border-color: #8a7960; box-shadow: 0 0 0 3px rgba(138,121,96,0.15); }
+
+  /* 加载动画 */
+  .typing-dot { animation: blink 1.4s infinite both; }
+  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+
+  /* 渐入 */
+  .fade-in { animation: fadeIn 0.4s ease both; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</head>
+<body class="h-screen overflow-hidden">
+
+<div class="flex h-screen">
+  <!-- 侧边栏 -->
+  <aside class="w-64 flex-shrink-0 flex flex-col paper-bg border-r border-ink-200">
+    <!-- Logo -->
+    <div class="p-6 border-b border-ink-200">
+      <h1 class="font-brush text-3xl text-ink-900 leading-none">墨流</h1>
+      <p class="text-xs text-ink-500 mt-1 font-xiaowei tracking-widest">小说创作工作台</p>
+    </div>
+
+    <!-- 标签导航 -->
+    <nav class="flex-1 py-4">
+      <button data-tab="chat" class="tab-btn active w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50">
+        <span class="text-lg">💬</span><span class="text-sm font-medium">对话创作</span>
+      </button>
+      <button data-tab="volumes" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600">
+        <span class="text-lg">📖</span><span class="text-sm font-medium">卷宗规划</span>
+      </button>
+      <button data-tab="chapters" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600">
+        <span class="text-lg">📜</span><span class="text-sm font-medium">章节列表</span>
+      </button>
+      <button data-tab="settings" class="tab-btn w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50 text-ink-600">
+        <span class="text-lg">🎭</span><span class="text-sm font-medium">世界设定</span>
+      </button>
+    </nav>
+
+    <!-- 底部状态 -->
+    <div class="p-4 border-t border-ink-200 text-xs text-ink-500">
+      <div class="flex items-center gap-2 mb-1">
+        <span id="status-dot" class="w-2 h-2 rounded-full bg-bamboo-500"></span>
+        <span id="status-text">后端连接中...</span>
+      </div>
+      <div id="novel-info" class="text-ink-400">未加载</div>
+    </div>
+  </aside>
+
+  <!-- 主区域 -->
+  <main class="flex-1 flex flex-col overflow-hidden">
+
+    <!-- ============ 对话创作 ============ -->
+    <section id="tab-chat" class="tab-pane flex-1 flex flex-col overflow-hidden">
+      <header class="px-8 py-4 border-b border-ink-200 flex items-center justify-between paper-bg">
+        <div>
+          <h2 class="text-lg font-bold text-ink-900">对话创作</h2>
+          <p class="text-xs text-ink-500">选择助手 · 描述章节 · 自动生成</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <select id="model-select" class="ink-input border border-ink-300 rounded-md px-3 py-2 text-sm bg-white">
+            <option value="">加载中...</option>
+          </select>
+          <button id="clear-chat" class="text-xs text-ink-500 hover:text-vermilion-600 px-2 py-1">清空</button>
+        </div>
+      </header>
+
+      <div id="chat-messages" class="flex-1 overflow-y-auto scrollbar px-8 py-6 space-y-4">
+        <!-- 欢迎信息 -->
+        <div class="msg-ai rounded-lg p-4 max-w-3xl mx-auto fade-in">
+          <p class="text-sm text-ink-700 leading-relaxed">
+            <span class="font-brush text-vermilion-600 text-lg">歡迎。</span>
+            選擇上方的助手模型，告訴我你想創作什麼。<br>
+            <span class="text-ink-500 text-xs mt-2 block">
+              • <b>章節生成助手</b>：輸入「生成第126章 沈夜發現驗鈔機真相」<br>
+              • <b>大綱規劃助手</b>：輸入「列表」或「創建 新卷 第31-80章 摘要」<br>
+              • <b>元數據回填助手</b>：輸入「全部」查看缺失統計
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <div class="px-8 py-4 border-t border-ink-200 paper-bg">
+        <div class="max-w-4xl mx-auto flex items-end gap-3">
+          <textarea id="chat-input" rows="2" placeholder="描述你想创作的内容..."
+            class="ink-input flex-1 border border-ink-300 rounded-lg px-4 py-3 text-sm resize-none bg-white"></textarea>
+          <button id="send-btn" class="bg-ink-800 hover:bg-ink-900 text-ink-50 px-6 py-3 rounded-lg text-sm font-medium transition disabled:opacity-50">
+            发送
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 卷宗规划 ============ -->
+    <section id="tab-volumes" class="tab-pane flex-1 overflow-y-auto scrollbar hidden">
+      <header class="px-8 py-4 border-b border-ink-200 flex items-center justify-between paper-bg sticky top-0 z-10">
+        <div>
+          <h2 class="text-lg font-bold text-ink-900">卷宗规划</h2>
+          <p class="text-xs text-ink-500">千章小说的卷结构</p>
+        </div>
+        <button id="new-volume-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-4 py-2 rounded-md text-sm">+ 新建卷</button>
+      </header>
+      <div id="volumes-list" class="p-8 space-y-3">
+        <div class="text-center text-ink-400 py-12">加载中...</div>
+      </div>
+    </section>
+
+    <!-- ============ 章节列表 ============ -->
+    <section id="tab-chapters" class="tab-paneflex-1 overflow-y-auto scrollbar hidden">
+      <header class="px-8 py-4 border-b border-ink-200 flex items-center justify-between paper-bg sticky top-0 z-10">
+        <div>
+          <h2 class="text-lg font-bold text-ink-900">章节列表</h2>
+          <p class="text-xs text-ink-500" id="chapter-count">-</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="chapter-start" type="number" value="1" class="ink-input w-20 border border-ink-300 rounded px-2 py-1 text-sm" placeholder="起">
+          <span class="text-ink-400">-</span>
+          <input id="chapter-end" type="number" value="50" class="ink-input w-20 border border-ink-300 rounded px-2 py-1 text-sm" placeholder="止">
+          <button id="load-chapters" class="bg-ink-700 hover:bg-ink-800 text-white px-3 py-1 rounded text-sm">查询</button>
+        </div>
+      </header>
+      <div id="chapters-list" class="p-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div class="text-center text-ink-400 py-12 col-span-full">加载中...</div>
+      </div>
+    </section>
+
+    <!-- ============ 世界设定 ============ -->
+    <section id="tab-settings" class="tab-pane flex-1 overflow-y-auto scrollbar hidden">
+      <header class="px-8 py-4 border-b border-ink-200 paper-bg sticky top-0 z-10">
+        <h2 class="text-lg font-bold text-ink-900">世界设定</h2>
+        <p class="text-xs text-ink-500">世界观 · 角色 · 伏笔</p>
+      </header>
+      <div class="p-8 space-y-8 max-w-5xl">
+
+        <!-- 世界观 -->
+        <div class="paper-bg border border-ink-200 rounded-lg p-6">
+          <h3 class="font-xiaowei text-xl text-ink-900 mb-4 flex items-center gap-2">
+            <span>🌍</span> 世界观
+          </h3>
+          <div id="world-info" class="text-sm text-ink-700 space-y-2">加载中...</div>
+        </div>
+
+        <!-- 角色 -->
+        <div>
+          <h3 class="font-xiaowei text-xl text-ink-900 mb-4 flex items-center gap-2">
+            <span>🎭</span> 角色列表
+          </h3>
+          <div id="characters-list" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="text-ink-400">加载中...</div>
+          </div>
+        </div>
+
+        <!-- 伏笔 -->
+        <div>
+          <h3 class="font-xiaowei text-xl text-ink-900 mb-4 flex items-center gap-2">
+            <span>🪤</span> 伏笔矩阵
+          </h3>
+          <div id="foreshadows-list" class="space-y-2">
+            <div class="text-ink-400">加载中...</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+const API = '/api/v1';
+const OPENAI_API = '/v1';
+
+// ========== 工具函数 ==========
+async function api(path, options = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail));
+  }
+  return res.status === 204 ? null : res.json();
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/```([\s\S]*?)```/g, '<pre>$1</pre>')
+    .replace(/`([^`]+)`/g, '<code class="bg-ink-100 px-1 rounded text-vermilion-700">$1</code>')
+    .replace(/^## (.+)$/gm, '<h3 class="font-bold text-ink-900 mt-3 mb-1">$1</h3>')
+    .replace(/^### (.+)$/gm, '<h4 class="font-bold text-ink-800 mt-2 mb-1">$1</h4>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
+function escapeHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ========== 状态检查 ==========
+async function checkStatus() {
+  try {
+    const data = await api('/status');
+    document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-bamboo-500';
+    document.getElementById('status-text').textContent = '已连接';
+    document.getElementById('novel-info').textContent = data.novel_title || data.title || '墨流';
+    return true;
+  } catch {
+    document.getElementById('status-dot').className = 'w-2 h-2 rounded-full bg-vermilion-500';
+    document.getElementById('status-text').textContent = '后端未连接';
+    return false;
+  }
+}
+
+// ========== 模型加载 ==========
+async function loadModels() {
+  try {
+    const res = await fetch(OPENAI_API + '/models');
+    const data = await res.json();
+    const sel = document.getElementById('model-select');
+    sel.innerHTML = '';
+    if (!data.data || data.data.length === 0) {
+      sel.innerHTML = '<option value="">无可用模型</option>';
+      return;
+    }
+    data.data.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = m.name || m.id;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    document.getElementById('model-select').innerHTML = '<option value="">加载失败</option>';
+  }
+}
+
+// ========== 对话创作 ==========
+const chatBox = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
+
+function addMessage(role, text) {
+  const div = document.createElement('div');
+  div.className = `fade-in flex ${role === 'user' ? 'justify-end' : 'justify-start'}`;
+  const inner = document.createElement('div');
+  inner.className = `${role === 'user' ? 'msg-user' : 'msg-ai'} rounded-lg p-4 max-w-3xl text-sm leading-relaxed`;
+  inner.innerHTML = role === 'user' ? escapeHtml(text).replace(/\n/g, '<br>') : renderMarkdown(text);
+  div.appendChild(inner);
+  chatBox.appendChild(div);
+  chatBox.scrollTop = chatBox.scrollHeight;
+  return inner;
+}
+
+function addTyping() {
+  const div = document.createElement('div');
+  div.id = 'typing-indicator';
+  div.className = 'flex justify-start fade-in';
+  div.innerHTML = `<div class="msg-ai rounded-lg p-4 max-w-3xl">
+    <div class="flex gap-1"><span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span>
+    <span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span>
+    <span class="typing-dot w-2 h-2 bg-ink-400 rounded-full"></span></div></div>`;
+  chatBox.appendChild(div);
+  chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+async function sendMessage() {
+  const text = chatInput.value.trim();
+  const model = document.getElementById('model-select').value;
+  if (!text || !model) return;
+
+  addMessage('user', text);
+  chatInput.value = '';
+  sendBtn.disabled = true;
+  addTyping();
+
+  try {
+    const res = await fetch(OPENAI_API + '/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model,
+        messages: [{ role: 'user', content: text }],
+        stream: false,
+      }),
+    });
+    document.getElementById('typing-indicator')?.remove();
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: { message: res.statusText } }));
+      addMessage('assistant', `❌ **请求失败**\n\n\`\`\`\n${err.error?.message || JSON.stringify(err)}\n\`\`\``);
+    } else {
+      const data = await res.json();
+      addMessage('assistant', data.choices?.[0]?.message?.content || '(空响应)');
+    }
+  } catch (e) {
+    document.getElementById('typing-indicator')?.remove();
+    addMessage('assistant', `❌ **网络错误**\n\n\`\`\`\n${e.message}\n\`\`\``);
+  } finally {
+    sendBtn.disabled = false;
+    chatInput.focus();
+  }
+}
+
+sendBtn.addEventListener('click', sendMessage);
+chatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+document.getElementById('clear-chat').addEventListener('click', () => {
+  chatBox.innerHTML = '';
+});
+
+// ========== 卷宗规划 ==========
+async function loadVolumes() {
+  const list = document.getElementById('volumes-list');
+  try {
+    const vols = await api('/volumes');
+    if (vols.length === 0) {
+      list.innerHTML = '<div class="text-center text-ink-400 py-12">还没有卷，点击右上角创建</div>';
+      return;
+    }
+    list.innerHTML = vols.map(v => {
+      const statusMap = { completed: '✅ 已完成', active: '🔵 进行中', planned: '⚪ 规划中' };
+      const statusColor = { completed: 'text-bamboo-600', active: 'text-ink-700', planned: 'text-ink-400' };
+      const chCount = v.chapter_end - v.chapter_start + 1;
+      return `
+        <div class="paper-bg border border-ink-200 rounded-lg p-5 hover:shadow-md transition">
+          <div class="flex items-start justify-between">
+            <div class="flex-1">
+              <div class="flex items-center gap-3 mb-2">
+                <span class="seal text-sm">卷${v.id}</span>
+                <h3 class="font-xiaowei text-lg text-ink-900">${escapeHtml(v.name)}</h3>
+              </div>
+              <p class="text-sm text-ink-600 mb-2">${escapeHtml(v.summary || '暂无摘要')}</p>
+              <div class="text-xs text-ink-500 flex gap-4">
+                <span>📄 第 ${v.chapter_start}-${v.chapter_end} 章</span>
+                <span>📝 共 ${chCount} 章</span>
+                <span class="${statusColor[v.status]}">${statusMap[v.status] || v.status}</span>
+              </div>
+            </div>
+            <button data-del-vol="${v.id}" class="text-ink-400 hover:text-vermilion-600 text-sm px-2">删</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('[data-del-vol]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('确认删除该卷？')) return;
+        try { await api(`/volumes/${btn.dataset.delVol}`, { method: 'DELETE' }); loadVolumes(); }
+        catch (e) { alert('删除失败: ' + e.message); }
+      });
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="text-center text-vermilion-600 py-12">加载失败: ${e.message}</div>`;
+  }
+}
+
+document.getElementById('new-volume-btn').addEventListener('click', async () => {
+  const name = prompt('卷名：');
+  if (!name) return;
+  const range = prompt('章节范围（起-止，如 31-80）：', '31-80');
+  if (!range) return;
+  const m = range.match(/(\d+)\s*-\s*(\d+)/);
+  if (!m) { alert('格式错误'); return; }
+  const summary = prompt('摘要（可选）：', '') || '';
+  try {
+    await api('/volumes', {
+      method: 'POST',
+      body: JSON.stringify({
+        name, chapter_start: parseInt(m[1]), chapter_end: parseInt(m[2]), summary
+      }),
+    });
+    loadVolumes();
+  } catch (e) { alert('创建失败: ' + e.message); }
+});
+
+// ========== 章节列表 ==========
+async function loadChapters() {
+  const start = parseInt(document.getElementById('chapter-start').value) || 1;
+  const end = parseInt(document.getElementById('chapter-end').value) || 50;
+  const list = document.getElementById('chapters-list');
+  list.innerHTML = '<div class="text-center text-ink-400 py-12 col-span-full">加载中...</div>';
+  try {
+    const data = await api(`/chapters?start=${start}&end=${end}`);
+    document.getElementById('chapter-count').textContent = `共 ${data.total} 章`;
+    if (data.chapters.length === 0) {
+      list.innerHTML = '<div class="text-center text-ink-400 py-12 col-span-full">该范围无章节</div>';
+      return;
+    }
+    list.innerHTML = data.chapters.map(ch => {
+      const emotionColor = {
+        '紧张': 'border-vermilion-500', '悲伤': 'border-ink-400',
+        '轻松': 'border-bamboo-500', '兴奋': 'border-gold-500',
+      }[ch.emotion] || 'border-ink-200';
+      return `
+        <div class="chapter-card paper-bg border-l-4 ${emotionColor} border-y border-r border-ink-200 rounded p-4"
+             data-ch="${ch.chapter_num}">
+          <div class="flex items-baseline justify-between mb-1">
+            <span class="font-brush text-vermilion-700 text-lg">第${ch.chapter_num}章</span>
+            ${ch.volume_id ? `<span class="text-xs text-ink-400">卷${ch.volume_id}</span>` : ''}
+          </div>
+          <h4 class="text-sm font-medium text-ink-800 line-clamp-2 mb-2">${escapeHtml(ch.title)}</h4>
+          <div class="text-xs text-ink-500 flex gap-3">
+            <span>📊 ${ch.word_count}字</span>
+            ${ch.emotion ? `<span>🎭 ${escapeHtml(ch.emotion)}</span>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('[data-ch]').forEach(card => {
+      card.addEventListener('click', () => showChapterDetail(parseInt(card.dataset.ch)));
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="text-center text-vermilion-600 py-12 col-span-full">加载失败: ${e.message}</div>`;
+  }
+}
+
+async function showChapterDetail(chNum) {
+  try {
+    const ch = await api(`/chapters/${chNum}`);
+    const html = `
+      <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-8" id="ch-modal">
+        <div class="bg-white rounded-lg max-w-3xl w-full max-h-[85vh] flex flex-col">
+          <div class="px-6 py-4 border-b border-ink-200 flex items-center justify-between">
+            <h3 class="font-brush text-2xl text-vermilion-700">第${ch.chapter_num}章 · ${escapeHtml(ch.title)}</h3>
+            <button id="close-modal" class="text-ink-400 hover:text-vermilion-600 text-xl">×</button>
+          </div>
+          <div class="px-6 py-4 overflow-y-auto scrollbar flex-1">
+            <div class="text-xs text-ink-500 flex gap-4 mb-4 pb-3 border-b border-ink-100">
+              <span>📊 ${ch.word_count}字</span>
+              ${ch.emotion ? `<span>🎭 ${escapeHtml(ch.emotion)}</span>` : ''}
+              ${ch.volume_id ? `<span>📖 卷${ch.volume_id}</span>` : ''}
+            </div>
+            ${ch.summary ? `<div class="bg-ink-50 rounded p-3 mb-4 text-sm text-ink-700">${escapeHtml(ch.summary)}</div>` : ''}
+            <div class="prose prose-sm max-w-none text-ink-800 leading-relaxed whitespace-pre-wrap">${escapeHtml(ch.content)}</div>
+          </div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+    document.getElementById('close-modal').addEventListener('click', () => document.getElementById('ch-modal').remove());
+    document.getElementById('ch-modal').addEventListener('click', (e) => {
+      if (e.target.id === 'ch-modal') e.target.remove();
+    });
+  } catch (e) { alert('加载失败: ' + e.message); }
+}
+
+document.getElementById('load-chapters').addEventListener('click', loadChapters);
+
+// ========== 世界设定 ==========
+async function loadSettings() {
+  // 世界观
+  try {
+    const w = await api('/world');
+    document.getElementById('world-info').innerHTML = `
+      <div class="grid grid-cols-2 gap-4">
+        <div><span class="text-ink-400">世界名：</span>${escapeHtml(w.world_name) || '-'}</div>
+        <div><span class="text-ink-400">时代：</span>${escapeHtml(w.era) || '-'}</div>
+        <div><span class="text-ink-400">类型：</span>${escapeHtml(w.genre) || '-'}</div>
+      </div>
+      ${w.summary ? `<div class="mt-3 pt-3 border-t border-ink-100"><span class="text-ink-400">摘要：</span>${escapeHtml(w.summary)}</div>` : ''}
+      ${w.key_constraints?.length ? `<div class="mt-2"><span class="text-ink-400">约束：</span>${w.key_constraints.map(c => `<span class="inline-block bg-ink-100 rounded px-2 py-0.5 mr-1 mb-1 text-xs">${escapeHtml(c)}</span>`).join('')}</div>` : ''}
+    `;
+  } catch (e) {
+    document.getElementById('world-info').innerHTML = `<span class="text-vermilion-600">加载失败</span>`;
+  }
+
+  // 角色
+  try {
+    const chars = await api('/characters');
+    const cl = document.getElementById('characters-list');
+    if (chars.length === 0) {
+      cl.innerHTML = '<div class="text-ink-400">无角色</div>';
+    } else {
+      cl.innerHTML = chars.map(c => `
+        <div class="paper-bg border border-ink-200 rounded-lg p-4">
+          <h4 class="font-xiaowei text-lg text-ink-900 mb-1">${escapeHtml(c.name)}</h4>
+          <p class="text-xs text-ink-600 mb-3">${escapeHtml(c.one_line_pitch)}</p>
+          <div class="text-xs text-ink-500 space-y-1">
+            ${c.core_desire ? `<div>🎯 <span class="text-ink-400">核心欲望：</span>${escapeHtml(c.core_desire)}</div>` : ''}
+            ${c.current_goal ? `<div>📍 <span class="text-ink-400">当前目标：</span>${escapeHtml(c.current_goal)}</div>` : ''}
+            ${c.current_emotion ? `<div>🎭 <span class="text-ink-400">情绪：</span>${escapeHtml(c.current_emotion)}</div>` : ''}
+          </div>
+        </div>`).join('');
+    }
+  } catch (e) {
+    document.getElementById('characters-list').innerHTML = `<div class="text-vermilion-600">加载失败</div>`;
+  }
+
+  // 伏笔
+  try {
+    const fs = await api('/foreshadows');
+    const fl = document.getElementById('foreshadows-list');
+    if (fs.length === 0) {
+      fl.innerHTML = '<div class="text-ink-400">无伏笔</div>';
+    } else {
+      const statusMap = {
+        planted: '<span class="text-gold-600">● 已埋</span>',
+        building: '<span class="text-ink-700">● 推进中</span>',
+        paid: '<span class="text-bamboo-600">● 已回收</span>',
+      };
+      const typeIcon = { mystery: '🔍', character: '👤', object: '📦', world: '🌍' };
+      fl.innerHTML = fs.map(f => `
+        <div class="paper-bg border border-ink-200 rounded p-3 flex items-start gap-3">
+          <span class="text-lg">${typeIcon[f.type] || '❓'}</span>
+          <div class="flex-1">
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-ink-800">${escapeHtml(f.description)}</span>
+              ${statusMap[f.status] || f.status}
+            </div>
+            <div class="text-xs text-ink-400 mt-1">
+              第${f.planted_chapter}章埋 ${f.paid_chapter ? `· 第${f.paid_chapter}章收` : ''}
+              ${f.notes ? `· ${escapeHtml(f.notes)}` : ''}
+            </div>
+          </div>
+        </div>`).join('');
+    }
+  } catch (e) {
+    document.getElementById('foreshadows-list').innerHTML = `<div class="text-vermilion-600">加载失败</div>`;
+  }
+}
+
+// ========== 标签切换 ==========
+const tabs = ['chat', 'volumes', 'chapters', 'settings'];
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll('.tab-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tab === tab);
+      b.classList.toggle('text-ink-600', b.dataset.tab !== tab);
+    });
+    tabs.forEach(t => {
+      const pane = document.getElementById('tab-' + t);
+      if (pane) pane.classList.toggle('hidden', t !== tab);
+    });
+    // 懒加载
+    if (tab === 'volumes') loadVolumes();
+    if (tab === 'chapters' && !document.getElementById('chapters-list').dataset.loaded) {
+      document.getElementById('chapters-list').dataset.loaded = '1';
+      loadChapters();
+    }
+    if (tab === 'settings') loadSettings();
+  });
+});
+
+// ========== 启动 ==========
+(async function init() {
+  await checkStatus();
+  await loadModels();
+})();
+</script>
+</body>
+</html>

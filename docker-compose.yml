@@ -7,9 +7,8 @@
 #   docker compose up -d
 #
 # 访问:
-#   OpenWebUI: http://localhost:3000  ← 主界面（聊天创作）
-#   墨流 API:  http://localhost:8000  ← 后端 API
-#   墨流看板:  http://localhost:8000/static/dashboard.html
+#   OpenWebUI: http://localhost:3000  ← 主界面（聊天创作，唯一前端）
+#   墨流 API:  http://localhost:8000  ← 后端 API（不提供前端页面）
 #
 # OpenWebUI 配置步骤（首次使用）:
 #   1. 访问 http://localhost:3000 注册管理员账号
