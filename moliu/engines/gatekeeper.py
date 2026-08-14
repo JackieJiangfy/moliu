@@ -56,6 +56,7 @@ class Gatekeeper:
         beat: str = "",
         emotion: str = "",
         force_check: bool = True,
+        novel_id: int = 1,
     ) -> GatekeeperResult:
         """
         执行生成前强制校验
@@ -66,14 +67,15 @@ class Gatekeeper:
             beat: 用户提供的节拍（可选，会在校验中告知缺失）
             emotion: 用户提供的情绪（可选）
             force_check: 是否强制执行检查（True=缺失则拒绝，False=仅警告）
+            novel_id: 小说ID(多本支持,默认1)
 
         Returns:
             GatekeeperResult
         """
         result = GatekeeperResult()
 
-        data_dir = self.config.resolve_data_dir()
-        output_dir = self.config.resolve_output_dir()
+        data_dir = self.config.resolve_data_dir(novel_id)
+        output_dir = self.config.resolve_output_dir(novel_id)
 
         # ========== 1. 卷索引检查 ==========
         vol_index_path = data_dir / "volumes" / "index.json"
@@ -130,7 +132,7 @@ class Gatekeeper:
 
             if not chapter_found:
                 # 检查该章是否在已完成的范围内（已生成的章节不需要大纲）
-                existing_chapter = output_dir / f"第{chapter_num}章" / "正文.md"
+                existing_chapter = output_dir / Config.chapter_dir_name(chapter_num) / "正文.md"
                 if existing_chapter.exists():
                     result.warnings.append(
                         f"第 {chapter_num} 章已有正文，大纲检查跳过"

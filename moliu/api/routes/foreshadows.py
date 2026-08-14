@@ -6,8 +6,10 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
+
+from moliu.api.locks import novel_lock
 
 router = APIRouter()
 
@@ -56,10 +58,11 @@ def _save_foreshadows(data_dir: Path, items: list[dict]) -> None:
 async def list_foreshadows(
     request: Request,
     status: str | None = None,
+    novel_id: int = Query(1, description="小说ID"),
 ):
     """获取伏笔列表"""
     cfg = request.app.state.config
-    items = _get_foreshadows(cfg.resolve_data_dir())
+    items = _get_foreshadows(cfg.resolve_data_dir(novel_id))
 
     if status:
         items = [e for e in items if e.get("status") == status]
@@ -80,65 +83,81 @@ async def list_foreshadows(
 
 
 @router.post("/foreshadows", response_model=ForeshadowItem, status_code=201)
-async def create_foreshadow(request: Request, body: ForeshadowCreate):
+async def create_foreshadow(
+    request: Request,
+    body: ForeshadowCreate,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """埋入伏笔"""
     cfg = request.app.state.config
-    items = _get_foreshadows(cfg.resolve_data_dir())
+    async with novel_lock(novel_id):
+        items = _get_foreshadows(cfg.resolve_data_dir(novel_id))
 
-    new_id = max((e.get("id", 0) for e in items), default=0) + 1
-    new_item = {
-        "id": new_id,
-        "description": body.description,
-        "type": body.type,
-        "priority": body.priority,
-        "status": "planted",
-        "planted_chapter": body.planted_chapter,
-        "paid_chapter": 0,
-        "notes": body.notes,
-    }
-    items.append(new_item)
-    _save_foreshadows(cfg.resolve_data_dir(), items)
+        new_id = max((e.get("id", 0) for e in items), default=0) + 1
+        new_item = {
+            "id": new_id,
+            "description": body.description,
+            "type": body.type,
+            "priority": body.priority,
+            "status": "planted",
+            "planted_chapter": body.planted_chapter,
+            "paid_chapter": 0,
+            "notes": body.notes,
+        }
+        items.append(new_item)
+        _save_foreshadows(cfg.resolve_data_dir(novel_id), items)
 
     return ForeshadowItem(**new_item)
 
 
 @router.put("/foreshadows/{foreshadow_id}", response_model=ForeshadowItem)
-async def update_foreshadow(request: Request, foreshadow_id: int, body: ForeshadowUpdate):
+async def update_foreshadow(
+    request: Request,
+    foreshadow_id: int,
+    body: ForeshadowUpdate,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """更新伏笔（推进或回收）"""
     cfg = request.app.state.config
-    items = _get_foreshadows(cfg.resolve_data_dir())
+    async with novel_lock(novel_id):
+        items = _get_foreshadows(cfg.resolve_data_dir(novel_id))
 
-    for e in items:
-        if e.get("id") == foreshadow_id:
-            if body.description is not None:
-                e["description"] = body.description
-            if body.type is not None:
-                e["type"] = body.type
-            if body.priority is not None:
-                e["priority"] = body.priority
-            if body.status is not None:
-                e["status"] = body.status
-            if body.paid_chapter is not None:
-                e["paid_chapter"] = body.paid_chapter
-            if body.notes is not None:
-                e["notes"] = body.notes
+        for e in items:
+            if e.get("id") == foreshadow_id:
+                if body.description is not None:
+                    e["description"] = body.description
+                if body.type is not None:
+                    e["type"] = body.type
+                if body.priority is not None:
+                    e["priority"] = body.priority
+                if body.status is not None:
+                    e["status"] = body.status
+                if body.paid_chapter is not None:
+                    e["paid_chapter"] = body.paid_chapter
+                if body.notes is not None:
+                    e["notes"] = body.notes
 
-            _save_foreshadows(cfg.resolve_data_dir(), items)
-            return ForeshadowItem(**e)
+                _save_foreshadows(cfg.resolve_data_dir(novel_id), items)
+                return ForeshadowItem(**e)
 
-    raise HTTPException(status_code=404, detail=f"伏笔 {foreshadow_id} 不存在")
+        raise HTTPException(status_code=404, detail=f"伏笔 {foreshadow_id} 不存在")
 
 
 @router.delete("/foreshadows/{foreshadow_id}", status_code=204)
-async def delete_foreshadow(request: Request, foreshadow_id: int):
+async def delete_foreshadow(
+    request: Request,
+    foreshadow_id: int,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """删除伏笔"""
     cfg = request.app.state.config
-    items = _get_foreshadows(cfg.resolve_data_dir())
+    async with novel_lock(novel_id):
+        items = _get_foreshadows(cfg.resolve_data_dir(novel_id))
 
-    for i, e in enumerate(items):
-        if e.get("id") == foreshadow_id:
-            items.pop(i)
-            _save_foreshadows(cfg.resolve_data_dir(), items)
-            return
+        for i, e in enumerate(items):
+            if e.get("id") == foreshadow_id:
+                items.pop(i)
+                _save_foreshadows(cfg.resolve_data_dir(novel_id), items)
+                return
 
-    raise HTTPException(status_code=404, detail=f"伏笔 {foreshadow_id} 不存在")
+        raise HTTPException(status_code=404, detail=f"伏笔 {foreshadow_id} 不存在")

@@ -8,8 +8,10 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from moliu.config import Config
 from moliu.data.schemas import ChapterMeta
 from moliu.engines.gatekeeper import Gatekeeper
+from moliu.api.locks import novel_lock
 
 router = APIRouter()
 
@@ -50,6 +52,7 @@ class GenerateRequest(BaseModel):
     characters: list[str] = []
     chapter_type: str = "auto"
     temperature: float | None = None
+    novel_id: int = 1
 
 
 class GenerateCheckResponse(BaseModel):
@@ -62,14 +65,14 @@ class GenerateCheckResponse(BaseModel):
 # --- 辅助函数 ---
 
 def _get_chapter_meta(output_dir: Path, ch: int) -> ChapterMeta | None:
-    meta_path = output_dir / f"第{ch}章" / "meta.json"
+    meta_path = output_dir / Config.chapter_dir_name(ch) / "meta.json"
     if meta_path.exists():
         return ChapterMeta.from_json(meta_path)
     return None
 
 
 def _get_chapter_content(output_dir: Path, ch: int) -> str:
-    content_path = output_dir / f"第{ch}章" / "正文.md"
+    content_path = output_dir / Config.chapter_dir_name(ch) / "正文.md"
     if content_path.exists():
         return content_path.read_text(encoding="utf-8")
     return ""
@@ -97,11 +100,12 @@ async def list_chapters(
     start: int = Query(1, ge=1, description="起始章节"),
     end: int = Query(50, ge=1, description="结束章节"),
     volume_id: int | None = Query(None, description="按卷筛选"),
+    novel_id: int = Query(1, description="小说ID"),
 ):
     """获取章节列表（分页）"""
     cfg = request.app.state.config
-    output_dir = cfg.resolve_output_dir()
-    data_dir = cfg.resolve_data_dir()
+    output_dir = cfg.resolve_output_dir(novel_id)
+    data_dir = cfg.resolve_data_dir(novel_id)
 
     chapters = []
     for ch in range(start, end + 1):
@@ -133,11 +137,15 @@ async def list_chapters(
 
 
 @router.get("/chapters/{chapter_num}", response_model=ChapterDetail)
-async def get_chapter(request: Request, chapter_num: int):
+async def get_chapter(
+    request: Request,
+    chapter_num: int,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取单章详情"""
     cfg = request.app.state.config
-    output_dir = cfg.resolve_output_dir()
-    data_dir = cfg.resolve_data_dir()
+    output_dir = cfg.resolve_output_dir(novel_id)
+    data_dir = cfg.resolve_data_dir(novel_id)
 
     meta = _get_chapter_meta(output_dir, chapter_num)
     if meta is None:
@@ -164,12 +172,13 @@ async def generate_check(
     beat: str = Query("", description="节拍描述"),
     emotion: str = Query("轻松", description="情绪"),
     characters: str = Query("", description="出场角色列表，逗号分隔"),
+    novel_id: int = Query(1, description="小说ID"),
 ):
     """生成前预检 — Gatekeeper 强制信息收集校验"""
     cfg = request.app.state.config
     from moliu.cli.utils import load_characters
 
-    all_chars = load_characters(cfg)
+    all_chars = load_characters(cfg, novel_id)
     char_names = [n.strip() for n in characters.split(",") if n.strip()]
     selected = [c for c in all_chars if c.name in char_names] if char_names else all_chars
 
@@ -177,7 +186,7 @@ async def generate_check(
     result = await gatekeeper.check(
         chapter_num, selected,
         beat=beat, emotion=emotion,
-        force_check=True,
+        force_check=True, novel_id=novel_id,
     )
 
     return GenerateCheckResponse(
@@ -193,11 +202,12 @@ async def update_chapter_content(
     request: Request,
     chapter_num: int,
     body: dict,
+    novel_id: int = Query(1, description="小说ID"),
 ):
     """手动更新章节正文（保存新版本）"""
     cfg = request.app.state.config
-    output_dir = cfg.resolve_output_dir()
-    chapter_dir = output_dir / f"第{chapter_num}章"
+    output_dir = cfg.resolve_output_dir(novel_id)
+    chapter_dir = output_dir / Config.chapter_dir_name(chapter_num)
 
     if not chapter_dir.exists():
         raise HTTPException(status_code=404, detail=f"第{chapter_num}章不存在")
@@ -206,36 +216,41 @@ async def update_chapter_content(
     if not content.strip():
         raise HTTPException(status_code=400, detail="内容不能为空")
 
-    # 保存版本
-    versions_dir = chapter_dir / "versions"
-    versions_dir.mkdir(parents=True, exist_ok=True)
-    existing = sorted(versions_dir.glob("v*.md"))
-    next_v = len(existing) + 1
+    async with novel_lock(novel_id):
+        # 保存版本
+        versions_dir = chapter_dir / "versions"
+        versions_dir.mkdir(parents=True, exist_ok=True)
+        existing = sorted(versions_dir.glob("v*.md"))
+        next_v = len(existing) + 1
 
-    # 当前内容备份到版本目录
-    current_path = chapter_dir / "正文.md"
-    if current_path.exists():
-        backup_path = versions_dir / f"v{next_v}.md"
-        current_path.rename(backup_path)
+        # 当前内容备份到版本目录
+        current_path = chapter_dir / "正文.md"
+        if current_path.exists():
+            backup_path = versions_dir / f"v{next_v}.md"
+            current_path.rename(backup_path)
 
-    # 写入新内容
-    current_path.write_text(content, encoding="utf-8")
+        # 写入新内容
+        current_path.write_text(content, encoding="utf-8")
 
-    # 更新字数
-    meta_path = chapter_dir / "meta.json"
-    if meta_path.exists():
-        meta = ChapterMeta.from_json(meta_path)
-        meta.word_count = len(content)
-        meta.to_json(meta_path)
+        # 更新字数
+        meta_path = chapter_dir / "meta.json"
+        if meta_path.exists():
+            meta = ChapterMeta.from_json(meta_path)
+            meta.word_count = len(content)
+            meta.to_json(meta_path)
 
     return {"ok": True, "chapter_num": chapter_num, "word_count": len(content), "version": next_v + 1}
 
 
 @router.get("/chapters/{chapter_num}/versions")
-async def get_chapter_versions(request: Request, chapter_num: int):
+async def get_chapter_versions(
+    request: Request,
+    chapter_num: int,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取章节版本历史"""
     cfg = request.app.state.config
-    chapter_dir = cfg.resolve_output_dir() / f"第{chapter_num}章"
+    chapter_dir = cfg.resolve_output_dir(novel_id) / Config.chapter_dir_name(chapter_num)
     versions_dir = chapter_dir / "versions"
 
     if not versions_dir.exists():
@@ -260,23 +275,29 @@ async def get_chapter_versions(request: Request, chapter_num: int):
 
 
 @router.post("/chapters/{chapter_num}/restore")
-async def restore_chapter(request: Request, chapter_num: int, body: dict):
+async def restore_chapter(
+    request: Request,
+    chapter_num: int,
+    body: dict,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """回滚到指定版本"""
     cfg = request.app.state.config
-    chapter_dir = cfg.resolve_output_dir() / f"第{chapter_num}章"
+    chapter_dir = cfg.resolve_output_dir(novel_id) / Config.chapter_dir_name(chapter_num)
     versions_dir = chapter_dir / "versions"
 
     target_version = body.get("version")
     if not target_version:
         raise HTTPException(status_code=400, detail="需指定 version")
 
-    source_path = versions_dir / f"v{target_version}.md"
-    if not source_path.exists():
-        raise HTTPException(status_code=404, detail=f"版本 v{target_version} 不存在")
+    async with novel_lock(novel_id):
+        source_path = versions_dir / f"v{target_version}.md"
+        if not source_path.exists():
+            raise HTTPException(status_code=404, detail=f"版本 v{target_version} 不存在")
 
-    current_path = chapter_dir / "正文.md"
-    content = source_path.read_text(encoding="utf-8")
-    current_path.write_text(content, encoding="utf-8")
+        current_path = chapter_dir / "正文.md"
+        content = source_path.read_text(encoding="utf-8")
+        current_path.write_text(content, encoding="utf-8")
 
     return {"ok": True, "chapter_num": chapter_num, "restored_version": target_version}
 
@@ -284,7 +305,11 @@ async def restore_chapter(request: Request, chapter_num: int, body: dict):
 # --- 上下文预览 ---
 
 @router.get("/chapters/{chapter_num}/context")
-async def get_chapter_context(request: Request, chapter_num: int):
+async def get_chapter_context(
+    request: Request,
+    chapter_num: int,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """预览生成第 N 章时将装配的上下文（不实际生成）
 
     返回：弧方向、角色状态、到期伏笔、约束、前章摘要、上一章收尾
@@ -295,9 +320,9 @@ async def get_chapter_context(request: Request, chapter_num: int):
     from moliu.data.schemas import WorldSetting
 
     try:
-        all_chars = load_characters(cfg)
-        world = load_world(cfg) or WorldSetting()
-        narrator = load_narrator(cfg)
+        all_chars = load_characters(cfg, novel_id)
+        world = load_world(cfg, novel_id) or WorldSetting()
+        narrator = load_narrator(cfg, novel_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"加载数据失败: {e}")
 
@@ -311,7 +336,7 @@ async def get_chapter_context(request: Request, chapter_num: int):
         raise HTTPException(status_code=500, detail=f"上下文装配失败: {e}")
 
     # 卷归属
-    vol_id = _get_volume_for_chapter(cfg.resolve_data_dir(), chapter_num)
+    vol_id = _get_volume_for_chapter(cfg.resolve_data_dir(novel_id), chapter_num)
 
     return {
         "chapter_num": chapter_num,
@@ -348,6 +373,7 @@ async def _run_generation(
     chapter_type: str = "auto",
     temperature: float | None = None,
     segmented: bool = True,
+    novel_id: int = 1,
 ) -> dict:
     """执行完整生成管线（复用 CLI write 逻辑）"""
     from moliu.cli.utils import load_characters, load_world, load_narrator
@@ -364,7 +390,7 @@ async def _run_generation(
     from moliu.deai.detector import DeAIDetector
     from moliu.deai.rewriter import DeAIRewriter
 
-    all_characters = load_characters(config)
+    all_characters = load_characters(config, novel_id)
     if not all_characters:
         raise ValueError("没有找到角色文件")
 
@@ -373,8 +399,8 @@ async def _run_generation(
     else:
         characters = all_characters
 
-    world = load_world(config)
-    narrator = load_narrator(config)
+    world = load_world(config, novel_id)
+    narrator = load_narrator(config, novel_id)
 
     gateway = DeepSeekGateway(config)
     prompts = PromptManager(config)
@@ -382,9 +408,9 @@ async def _run_generation(
     checker = ConsistencyChecker(gateway)
     prechecker = AnchoredPreChecker(gateway)
     reader = ReaderEvaluator(gateway)
-    tracker = RhythmTracker(config.resolve_data_dir())
+    tracker = RhythmTracker(config.resolve_data_dir(novel_id))
     usage_tracker = UsageTracker(
-        config.resolve_data_dir() / "usage_log.jsonl",
+        config.resolve_data_dir(novel_id) / "usage_log.jsonl",
         monthly_budget=getattr(config, 'monthly_token_budget', 0),
     )
     gateway.usage_tracker = usage_tracker
@@ -393,60 +419,76 @@ async def _run_generation(
         config, gateway, prompts,
         checker=checker, prechecker=prechecker,
         reader=reader, tracker=tracker,
+        novel_id=novel_id,
     )
 
     # 1. 锚点预检
     pre_ok, pre_text = await pipeline.run_pre_check(beat, characters, chapter_num=chapter_num)
 
     # 2. 上下文组装
-    assembler = StructuredAssembler(config)
+    assembler = StructuredAssembler(config, novel_id=novel_id)
     ctx = await assembler.assemble(
         chapter_num, beat, characters, world,
         narrator=narrator, narrator_guide="",
         last_emotion=emotion,
     )
 
-    # 3. 生成
-    result = await pipeline.generator.generate_chapter(
-        chapter_num=chapter_num,
-        beat=beat,
-        characters=characters,
-        world=world,
-        last_emotion=emotion,
-        recent_chapters=ctx.recent_chapters_full,
-        narrator_card=narrator,
-        temperature=temperature,
-        segmented=segmented,
-        chapter_type=chapter_type,
-    )
+    # 3. 生成 + 4. 去AI味 + 5. 质检,不达标自动重试
+    async def _generate_once():
+        """单次生成 + 去AI味 — 返回 ChapterResult"""
+        r = await pipeline.generator.generate_chapter(
+            chapter_num=chapter_num,
+            beat=beat,
+            characters=characters,
+            world=world,
+            last_emotion=emotion,
+            recent_chapters=ctx.recent_chapters_full,
+            narrator_card=narrator,
+            temperature=temperature,
+            segmented=segmented,
+            chapter_type=chapter_type,
+        )
 
-    # 4. 去AI味
-    detector = DeAIDetector()
-    l1_report = detector.detect_l1(result.content)
-    if l1_report.hard_violations or l1_report.overall_score < 0.8:
-        rewriter = DeAIRewriter(gateway)
-        try:
-            rewritten = await rewriter.rewrite_flagged(
-                result.content, l1_report.flagged_paragraphs[:3],
-                chapter_num=chapter_num,
-            )
-            if rewritten != result.content:
-                result = ChapterResult(
-                    chapter_num=result.chapter_num,
-                    content=rewritten,
-                    word_count=count_words(rewritten),
-                    model_used=result.model_used,
-                    tokens_used=result.tokens_used,
+        # 去AI味
+        detector = DeAIDetector()
+        l1_report = detector.detect_l1(r.content)
+        if l1_report.hard_violations or l1_report.overall_score < 0.8:
+            rewriter = DeAIRewriter(gateway)
+            try:
+                rewritten = await rewriter.rewrite_flagged(
+                    r.content, l1_report.flagged_paragraphs[:3],
+                    chapter_num=chapter_num,
                 )
+                if rewritten != r.content:
+                    r = ChapterResult(
+                        chapter_num=r.chapter_num,
+                        content=rewritten,
+                        word_count=count_words(rewritten),
+                        model_used=r.model_used,
+                        tokens_used=r.tokens_used,
+                    )
+            except Exception:
+                pass
+        return r
+
+    async def _quality(r):
+        qr = QualityReport()
+        try:
+            qr = await pipeline.run_quality_checks(r, beat, characters, world, narrator, chapter_num=chapter_num)
         except Exception:
             pass
+        return qr
 
-    # 5. 质检
-    qr = QualityReport()
-    try:
-        qr = await pipeline.run_quality_checks(result, beat, characters, world, narrator, chapter_num=chapter_num)
-    except Exception:
-        pass
+    retry_conditions = tuple(
+        s.strip() for s in getattr(config, "quality_retry_on", "fatal").split(",")
+        if s.strip()
+    )
+    result, qr = await pipeline.run_with_retry(
+        generate_fn=_generate_once,
+        quality_fn=_quality,
+        max_retries=getattr(config, "quality_retry_max", 1),
+        retry_on=retry_conditions,
+    )
 
     # 6. 落盘 + 记忆 + 节奏
     summary_text = await pipeline.generator._generate_summary_with_llm(result.content, chapter_num)
@@ -456,7 +498,7 @@ async def _run_generation(
     pipeline.save_to_memory(chapter_num, result, clean_summary, emotion, characters)
     pipeline.save_rhythm_record(chapter_num, result, qr, chapter_type, emotion)
 
-    filepath = config.resolve_output_dir() / f"第{chapter_num}章" / "正文.md"
+    filepath = config.resolve_output_dir(novel_id) / Config.chapter_dir_name(chapter_num) / "正文.md"
 
     return {
         "result": result,
@@ -467,44 +509,49 @@ async def _run_generation(
 
 @router.post("/generate", response_model=GenerateResponse)
 async def generate_chapter(request: Request, body: GenerateRequest):
-    """生成单章（含 Gatekeeper 强制校验 + 完整管线）"""
+    """生成单章（含 Gatekeeper 强制校验 + 完整管线）
+
+    加锁防止同本小说并发生成 — 但允许不同小说并行生成。
+    """
     cfg = request.app.state.config
     from moliu.cli.utils import load_characters
 
-    all_chars = load_characters(cfg)
-    char_names = body.characters if body.characters else []
-    selected = [c for c in all_chars if c.name in char_names] if char_names else all_chars
+    async with novel_lock(body.novel_id):
+        all_chars = load_characters(cfg, body.novel_id)
+        char_names = body.characters if body.characters else []
+        selected = [c for c in all_chars if c.name in char_names] if char_names else all_chars
 
-    # Gatekeeper 校验
-    gatekeeper = Gatekeeper(cfg)
-    gk = await gatekeeper.check(
-        body.chapter_num, selected,
-        beat=body.beat, emotion=body.emotion,
-        force_check=True,
-    )
-    if not gk.passed:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "message": "Gatekeeper 校验未通过",
-                "missing_items": gk.missing_items,
-                "warnings": gk.warnings,
-            },
+        # Gatekeeper 校验
+        gatekeeper = Gatekeeper(cfg)
+        gk = await gatekeeper.check(
+            body.chapter_num, selected,
+            beat=body.beat, emotion=body.emotion,
+            force_check=True, novel_id=body.novel_id,
         )
+        if not gk.passed:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "message": "Gatekeeper 校验未通过",
+                    "missing_items": gk.missing_items,
+                    "warnings": gk.warnings,
+                },
+            )
 
-    # 执行生成
-    try:
-        gen = await _run_generation(
-            cfg,
-            chapter_num=body.chapter_num,
-            beat=body.beat,
-            emotion=body.emotion,
-            characters_filter=body.characters,
-            chapter_type=body.chapter_type,
-            temperature=body.temperature,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成失败: {str(e)[:200]}")
+        # 执行生成
+        try:
+            gen = await _run_generation(
+                cfg,
+                chapter_num=body.chapter_num,
+                beat=body.beat,
+                emotion=body.emotion,
+                characters_filter=body.characters,
+                chapter_type=body.chapter_type,
+                temperature=body.temperature,
+                novel_id=body.novel_id,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"生成失败: {str(e)[:200]}")
 
     result = gen["result"]
     qr = gen["quality"]

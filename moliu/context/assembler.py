@@ -58,8 +58,9 @@ class StructuredContext:
 class StructuredAssembler:
     """作家的上下文组装：精确查询，不语义检索"""
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, novel_id: int = 1):
         self.config = config
+        self.novel_id = novel_id
         self._cache: dict[str, str] = {}  # path → content
 
     def _read_cached(self, path: Path) -> str | None:
@@ -109,7 +110,7 @@ class StructuredAssembler:
 
         ctx.last_300_words = self._load_last_300_words(chapter_num)
 
-        # 图谱反向注入（墨脉图）— 失败时优雅降级，不阻断装配
+        # 图谱反向注入（本地内建）— 失败时优雅降级，不阻断装配
         try:
             ctx.graph_insights = await self.inject_graph_context(chapter_num, characters)
         except Exception as e:
@@ -123,7 +124,7 @@ class StructuredAssembler:
 
     def _load_arc_direction(self, chapter_num: int) -> str:
         """从大纲文件读取当前弧的方向。用正则以行首章号匹配，避免误匹配注释/对话。"""
-        outlines_dir = self.config.resolve_data_dir() / "outlines"
+        outlines_dir = self.config.resolve_data_dir(self.novel_id) / "outlines"
         if not outlines_dir.exists():
             logger.info("大纲目录 %s 不存在，跳过弧方向", outlines_dir)
             return ""
@@ -232,7 +233,7 @@ class StructuredAssembler:
 
     def _load_due_foreshadows(self, chapter_num: int) -> str:
         """从伏笔文件查该回收/推进的伏笔。处理边界值。"""
-        fs_file = self.config.resolve_data_dir() / "foreshadow.json"
+        fs_file = self.config.resolve_data_dir(self.novel_id) / "foreshadow.json"
         if not fs_file.exists():
             return ""
 
@@ -306,11 +307,11 @@ class StructuredAssembler:
         if chapter_num <= 1:
             return ""
 
-        output_dir = self.config.resolve_output_dir()
+        output_dir = self.config.resolve_output_dir(self.novel_id)
         loaded = 0
         parts = []
         for n in range(chapter_num - 1, max(0, chapter_num - 4), -1):
-            path = output_dir / f"第{n}章" / "正文.md"
+            path = output_dir / Config.chapter_dir_name(n) / "正文.md"
             text = self._read_cached(path)
             if text is not None:
                 loaded += len(text)
@@ -320,37 +321,40 @@ class StructuredAssembler:
         return "\n\n".join(parts)
 
     async def inject_graph_context(self, chapter_num: int, characters: list[CharacterCard]) -> str:
-        """从墨脉图图谱拉取关系数据，生成可指导写作的上下文"""
+        """从本地关系图谱 + 伏笔表 拉取数据，生成可指导写作的上下文
+
+        内建图谱 — 不再依赖外部墨脉图服务。读取 data/novels/{id}/ 下:
+        - relationships.json: 关系图谱(节点=角色, 边=关系)
+        - foreshadows.json:  伏笔表
+        - characters/*.yaml: 角色卡(含 state.last_chapter_appeared)
+        """
         config = self.config
-        if not config.is_momaitu_enabled():
-            raise RuntimeError("图谱未启用——请在 .env 中配置 MO_MOMAITU_* 并启动墨脉图后端")
+        data_dir = config.resolve_data_dir(self.novel_id)
 
-        try:
-            from moliu.sync.client import MomaituSyncClient
-            client = MomaituSyncClient(
-                base_url=config.momaitu_base_url,
-                username=config.momaitu_username,
-                password=config.momaitu_password,
-            )
-            novel_id = config.momaitu_novel_id
+        parts: list[str] = []
+        char_names = {c.name for c in characters}
 
-            graph_chars = await client.get_characters(novel_id)
-            graph_foreshadows = await client.get_foreshadows(novel_id)
-
-            parts = []
-            char_names = {c.name for c in characters}
-
-            # 1. 角色出场间隔告警
-            long_absent = []
-            rarely_seen = []
-            all_chars_absent = []
-            for gc in graph_chars:
-                name = gc.get("name", "")
-                last_ch = int(gc.get("lastChapterAppeared", 0) or 0)
-                gap = chapter_num - last_ch if last_ch > 0 else chapter_num
-                status = gc.get("status", "")
+        # 1. 角色出场间隔告警 — 从角色卡读 last_chapter_appeared
+        long_absent: list[str] = []
+        rarely_seen: list[str] = []
+        all_chars_absent: list[str] = []
+        chars_dir = data_dir / "characters"
+        if chars_dir.exists():
+            for f in chars_dir.glob("*.yaml"):
+                try:
+                    card = CharacterCard.from_yaml(f)
+                except Exception:
+                    continue
+                name = card.name
+                state = card.state
+                if not state:
+                    continue
+                # 状态判断:死亡/离场不提醒
+                status = getattr(state, "status", "") or ""
                 if status in ("dead", "left", "dropped"):
                     continue
+                last_ch = int(getattr(state, "last_chapter_appeared", 0) or 0)
+                gap = chapter_num - last_ch if last_ch > 0 else chapter_num
                 if name in char_names and gap > 5:
                     long_absent.append(f"[{name}] 已 {gap} 章没出现了——读者可能忘了 Ta 在干嘛")
                 elif name not in char_names:
@@ -358,26 +362,36 @@ class StructuredAssembler:
                 elif gap > 15:
                     rarely_seen.append(f"[{name}] 虽然本章未出场，但已 {gap} 章没被提及——考虑本章随口提一句")
 
-            if long_absent:
-                parts.append("【角色回归提醒】以下角色本章出场但已离开读者视野较久:\n" + "\n".join(long_absent))
-            if rarely_seen:
-                parts.append("【角色存在感】以下角色长期未露面:\n" + "\n".join(rarely_seen))
-            if all_chars_absent and len(all_chars_absent) > 2:
-                parts.append(f"【剧情密度】{len(char_names)} 个角色出现在本章，" + "、".join(all_chars_absent[:4]) + f" 等 {len(all_chars_absent)} 个角色未出场。考虑配角线是否需要推进")
+        if long_absent:
+            parts.append("【角色回归提醒】以下角色本章出场但已离开读者视野较久:\n" + "\n".join(long_absent))
+        if rarely_seen:
+            parts.append("【角色存在感】以下角色长期未露面:\n" + "\n".join(rarely_seen))
+        if all_chars_absent and len(all_chars_absent) > 2:
+            parts.append(
+                f"【剧情密度】{len(char_names)} 个角色出现在本章，"
+                + "、".join(all_chars_absent[:4])
+                + f" 等 {len(all_chars_absent)} 个角色未出场。考虑配角线是否需要推进"
+            )
 
-            # 2. 活跃伏笔
-            active_fs = []
-            critical_fs = []
-            for fs in graph_foreshadows:
+        # 2. 活跃伏笔 — 从本地 foreshadows.json
+        fs_path = data_dir / "foreshadows.json"
+        if fs_path.exists():
+            try:
+                foreshadows = json.loads(fs_path.read_text(encoding="utf-8"))
+            except Exception:
+                foreshadows = []
+
+            active_fs: list[str] = []
+            critical_fs: list[str] = []
+            for fs in foreshadows:
                 s = fs.get("status", "")
                 if s not in ("planted", "building"):
                     continue
-                planted = int(fs.get("plantedChapter", 0) or 0)
+                planted = int(fs.get("planted_chapter", 0) or fs.get("plantedChapter", 0) or 0)
                 if planted <= 0 or planted > chapter_num:
                     continue
                 age = chapter_num - planted
-                desc = fs.get("description", "")[:80]
-                eid = fs.get("id", "?")[:12]
+                desc = (fs.get("description", "") or "")[:80]
                 if age > FORESHADOW_AGE_CRITICAL:
                     critical_fs.append(f"[!!] '{desc}' 已埋 {age} 章——再不回收读者要忘了")
                 elif age > FORESHADOW_AGE_NORMAL:
@@ -388,19 +402,37 @@ class StructuredAssembler:
             elif active_fs:
                 parts.append("【伏笔提醒】\n" + "\n".join(active_fs))
 
-            # 3. 如果没有任何提醒——说明剧情平衡，给正向反馈
-            if not parts and chapter_num > 5:
-                parts.append(f"【图谱状态】{len(graph_chars)} 个角色出场节奏正常，伏笔状态良好。保持。")
+        # 3. 关系张力提示 — 从本地 relationships.json
+        rel_path = data_dir / "relationships.json"
+        if rel_path.exists():
+            try:
+                rels = json.loads(rel_path.read_text(encoding="utf-8"))
+            except Exception:
+                rels = []
+            # 本章出场角色之间的活跃关系
+            active_rels = [
+                r for r in rels
+                if r.get("source_name") in char_names and r.get("target_name") in char_names
+            ]
+            if active_rels:
+                tense = [r for r in active_rels if r.get("category") == "negative" and r.get("intensity", 5) >= 7]
+                if tense:
+                    lines = [
+                        f"[{r['source_name']} ↔ {r['target_name']}] {r.get('rel_type','')} — {r.get('description','')[:60]}"
+                        for r in tense[:3]
+                    ]
+                    parts.append("【关系张力】本章出场角色间的高张力关系:\n" + "\n".join(lines))
 
-            return "\n\n".join(parts) if parts else ""
+        # 4. 如果没有任何提醒——说明剧情平衡，给正向反馈
+        if not parts and chapter_num > 5:
+            parts.append(f"【图谱状态】角色出场节奏正常，伏笔状态良好。保持。")
 
-        except Exception as e:
-            raise RuntimeError(f"图谱注入失败——请确认墨脉图后端是否启动: {e}") from e
+        return "\n\n".join(parts) if parts else ""
 
     def _load_last_300_words(self, chapter_num: int) -> str:
         if chapter_num <= 1:
             return ""
-        path = self.config.resolve_output_dir() / f"第{chapter_num - 1}章" / "正文.md"
+        path = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(chapter_num - 1) / "正文.md"
         text = self._read_cached(path)
         if text is not None:
             return text[-300:] if len(text) > 300 else text

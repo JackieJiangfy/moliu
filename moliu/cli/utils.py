@@ -19,9 +19,9 @@ def load_config() -> Config:
         raise typer.Exit(code=1)
 
 
-def load_characters(config: Config) -> list[CharacterCard]:
+def load_characters(config: Config, novel_id: int = 1) -> list[CharacterCard]:
     """加载所有角色卡"""
-    chars_dir = config.resolve_data_dir() / "characters"
+    chars_dir = config.resolve_data_dir(novel_id) / "characters"
     if not chars_dir.exists():
         return []
     characters = []
@@ -33,21 +33,21 @@ def load_characters(config: Config) -> list[CharacterCard]:
     return characters
 
 
-def load_world(config: Config) -> WorldSetting | None:
+def load_world(config: Config, novel_id: int = 1) -> WorldSetting | None:
     """加载世界观设定"""
-    world_path = config.resolve_data_dir() / "world" / "world.yaml"
+    world_path = config.resolve_data_dir(novel_id) / "world" / "world.yaml"
     if not world_path.exists():
         return None
     return WorldSetting.from_yaml(world_path)
 
 
-def load_narrator(config: Config) -> NarratorCard | None:
+def load_narrator(config: Config, novel_id: int = 1) -> NarratorCard | None:
     """加载叙述者卡（优先 Markdown，其次 YAML）"""
-    narrator_md_path = config.resolve_data_dir() / "narrator.md"
+    narrator_md_path = config.resolve_data_dir(novel_id) / "narrator.md"
     if narrator_md_path.exists():
         return NarratorCard.from_markdown(narrator_md_path)
 
-    narrator_yaml_path = config.resolve_data_dir() / "narrator.yaml"
+    narrator_yaml_path = config.resolve_data_dir(novel_id) / "narrator.yaml"
     if narrator_yaml_path.exists():
         return NarratorCard.from_yaml(narrator_yaml_path)
 

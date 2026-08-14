@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from moliu.api.locks import novel_lock
 from moliu.data.schemas import CharacterCard
 
 router = APIRouter()
@@ -31,10 +32,13 @@ class CharacterUpdate(BaseModel):
 
 
 @router.get("/characters", response_model=list[CharacterResponse])
-async def list_characters(request: Request):
+async def list_characters(
+    request: Request,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取所有角色"""
     cfg = request.app.state.config
-    char_dir = cfg.resolve_data_dir() / "characters"
+    char_dir = cfg.resolve_data_dir(novel_id) / "characters"
 
     characters = []
     for f in sorted(char_dir.glob("*.yaml")):
@@ -56,10 +60,14 @@ async def list_characters(request: Request):
 
 
 @router.get("/characters/{name}", response_model=CharacterResponse)
-async def get_character(request: Request, name: str):
+async def get_character(
+    request: Request,
+    name: str,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取单个角色详情"""
     cfg = request.app.state.config
-    char_path = cfg.resolve_data_dir() / "characters" / f"{name}.yaml"
+    char_path = cfg.resolve_data_dir(novel_id) / "characters" / f"{name}.yaml"
 
     if not char_path.exists():
         raise HTTPException(status_code=404, detail=f"角色「{name}」不存在")
@@ -78,27 +86,33 @@ async def get_character(request: Request, name: str):
 
 
 @router.put("/characters/{name}", response_model=CharacterResponse)
-async def update_character(request: Request, name: str, body: CharacterUpdate):
+async def update_character(
+    request: Request,
+    name: str,
+    body: CharacterUpdate,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """更新角色状态"""
     cfg = request.app.state.config
-    char_dir = cfg.resolve_data_dir() / "characters"
+    char_dir = cfg.resolve_data_dir(novel_id) / "characters"
     char_path = char_dir / f"{name}.yaml"
 
-    if not char_path.exists():
-        raise HTTPException(status_code=404, detail=f"角色「{name}」不存在")
+    async with novel_lock(novel_id):
+        if not char_path.exists():
+            raise HTTPException(status_code=404, detail=f"角色「{name}」不存在")
 
-    card = CharacterCard.from_yaml(char_path)
+        card = CharacterCard.from_yaml(char_path)
 
-    if body.one_line_pitch is not None:
-        card.one_line_pitch = body.one_line_pitch
-    if body.current_location is not None and card.state:
-        card.state.location = body.current_location
-    if body.current_goal is not None and card.state:
-        card.state.current_goal = body.current_goal
-    if body.current_emotion is not None and card.state:
-        card.state.current_emotion = body.current_emotion
+        if body.one_line_pitch is not None:
+            card.one_line_pitch = body.one_line_pitch
+        if body.current_location is not None and card.state:
+            card.state.location = body.current_location
+        if body.current_goal is not None and card.state:
+            card.state.current_goal = body.current_goal
+        if body.current_emotion is not None and card.state:
+            card.state.current_emotion = body.current_emotion
 
-    card.to_yaml(char_path)
+        card.to_yaml(char_path)
 
     return CharacterResponse(
         name=card.name,

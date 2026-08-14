@@ -73,10 +73,12 @@ class ChapterPipeline:
         prechecker: AnchoredPreChecker | None = None,
         reader: ReaderEvaluator | None = None,
         tracker: RhythmTracker | None = None,
+        novel_id: int = 1,
     ):
         self.config = config
+        self.novel_id = novel_id
         self.gateway = gateway
-        self.generator = Generator(config, gateway, prompts)
+        self.generator = Generator(config, gateway, prompts, novel_id=novel_id)
         self.memory = memory
         self.retriever = retriever
         self.checker = checker
@@ -157,6 +159,64 @@ class ChapterPipeline:
         alerts = self.tracker.check_variety()
         qr.rhythm_alerts = alerts
 
+    async def run_with_retry(
+        self,
+        *,
+        generate_fn,
+        quality_fn,
+        max_retries: int = 1,
+        retry_on: tuple[str, ...] = ("fatal",),
+    ) -> tuple[ChapterResult, QualityReport]:
+        """生成 + 质检,不达标自动重试
+
+        Args:
+            generate_fn: 无参 async callable,返回 ChapterResult
+            quality_fn: async callable(result) -> QualityReport
+            max_retries: 最多重试次数(默认 1,即最多生成 2 次)
+            retry_on: 触发重试的条件
+                      - "fatal"  一致性致命问题(默认)
+                      - "reader" 读者明确不想继续
+                      - "tension_low"  张力 < 4
+                      - "repetitive"  读者感觉重复
+
+        Returns:
+            (result, qr) 最终结果 + 质检报告(最后一次)
+        """
+        import logging
+        log = logging.getLogger(__name__)
+
+        result = await generate_fn()
+        qr = await quality_fn(result)
+
+        for attempt in range(max_retries):
+            should_retry = False
+            reasons: list[str] = []
+
+            if "fatal" in retry_on and qr.consistency_fatal > 0:
+                should_retry = True
+                reasons.append(f"{qr.consistency_fatal} 个致命问题")
+            if "reader" in retry_on and not qr.reader_want_next:
+                should_retry = True
+                reasons.append("读者不想继续")
+            if "tension_low" in retry_on and qr.tension_score < 4:
+                should_retry = True
+                reasons.append(f"张力 {qr.tension_score}/10")
+            if "repetitive" in retry_on and qr.reader_repetitive:
+                should_retry = True
+                reasons.append("读者感觉重复")
+
+            if not should_retry:
+                break
+
+            log.warning(
+                "第 %d 次重试: %s",
+                attempt + 1, "; ".join(reasons),
+            )
+            result = await generate_fn()
+            qr = await quality_fn(result)
+
+        return result, qr
+
     def save_to_memory(
         self,
         chapter_num: int,
@@ -186,7 +246,7 @@ class ChapterPipeline:
         self.generator.save_chapter(result, emotion=emotion, summary=summary, characters=characters)
 
         # 额外保存质检报告（save_chapter 不写这些）
-        output_dir = self.config.resolve_output_dir() / f"第{chapter_num}章"
+        output_dir = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(chapter_num)
         (output_dir / "质量报告.md").write_text(qr.summary(), encoding="utf-8")
         if qr.consistency:
             (output_dir / "一致性检查.md").write_text(qr.consistency, encoding="utf-8")

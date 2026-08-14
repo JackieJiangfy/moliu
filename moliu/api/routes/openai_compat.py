@@ -55,6 +55,7 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage]
     stream: bool = False
     temperature: float | None = None
+    novel_id: int = 1  # 多小说支持,默认第1本
 
 
 @router.get("/v1/models")
@@ -91,11 +92,11 @@ async def chat_completions(request: Request, body: ChatCompletionRequest):
 
     # 根据模型分发
     if body.model == "moliu-chapter-generator":
-        response_text = await _handle_chapter_generation(request, user_input)
+        response_text = await _handle_chapter_generation(request, user_input, body.novel_id)
     elif body.model == "moliu-outline-planner":
-        response_text = await _handle_outline_planning(request, user_input)
+        response_text = await _handle_outline_planning(request, user_input, body.novel_id)
     elif body.model == "moliu-metadata-backfill":
-        response_text = await _handle_metadata_backfill(request, user_input)
+        response_text = await _handle_metadata_backfill(request, user_input, body.novel_id)
     else:
         response_text = f"未知模型: {body.model}。请选择墨流虚拟模型。"
 
@@ -149,7 +150,7 @@ async def _stream_response(model: str, text: str):
 
 # --- 章节生成 ---
 
-async def _handle_chapter_generation(request: Request, user_input: str) -> str:
+async def _handle_chapter_generation(request: Request, user_input: str, novel_id: int = 1) -> str:
     """处理章节生成对话"""
     cfg = request.app.state.config
     import httpx
@@ -222,6 +223,7 @@ async def _handle_chapter_generation(request: Request, user_input: str) -> str:
             characters_filter=[],
             chapter_type="auto",
             temperature=None,
+            novel_id=novel_id,
         )
     except Exception as e:
         return f"## ❌ 生成失败\n\n错误: {str(e)[:300]}"
@@ -258,15 +260,15 @@ async def _handle_chapter_generation(request: Request, user_input: str) -> str:
 
 # --- 大纲规划 ---
 
-async def _handle_outline_planning(request: Request, user_input: str) -> str:
+async def _handle_outline_planning(request: Request, user_input: str, novel_id: int = 1) -> str:
     """处理大纲规划对话"""
     cfg = request.app.state.config
 
     # 解析命令
     if "列表" in user_input or "查看" in user_input or "list" in user_input.lower():
-        return await _list_volumes(cfg)
+        return await _list_volumes(cfg, novel_id)
     elif "创建" in user_input or "新建" in user_input or "create" in user_input.lower():
-        return await _create_volume(cfg, user_input)
+        return await _create_volume(cfg, user_input, novel_id)
     else:
         return (
             "## 📐 大纲规划助手\n\n"
@@ -275,16 +277,16 @@ async def _handle_outline_planning(request: Request, user_input: str) -> str:
             "- **创建新卷**：输入「创建 卷名 第1-30章 摘要」\n"
             "- **生成大纲**：输入「生成大纲 第31-50章」\n\n"
             "当前卷结构：\n"
-            + await _list_volumes(cfg)
+            + await _list_volumes(cfg, novel_id)
         )
 
 
-async def _list_volumes(cfg) -> str:
+async def _list_volumes(cfg, novel_id: int = 1) -> str:
     """列出所有卷"""
     import json
     from pathlib import Path
 
-    index_path = cfg.resolve_data_dir() / "volumes" / "index.json"
+    index_path = cfg.resolve_data_dir(novel_id) / "volumes" / "index.json"
     if not index_path.exists():
         return "卷索引不存在。请先创建卷。"
 
@@ -301,13 +303,13 @@ async def _list_volumes(cfg) -> str:
     return "\n".join(lines)
 
 
-async def _create_volume(cfg, user_input: str) -> str:
+async def _create_volume(cfg, user_input: str, novel_id: int = 1) -> str:
     """创建新卷"""
     import json
     from pathlib import Path
     from datetime import datetime
 
-    index_path = cfg.resolve_data_dir() / "volumes" / "index.json"
+    index_path = cfg.resolve_data_dir(novel_id) / "volumes" / "index.json"
     if not index_path.exists():
         return "卷索引不存在。"
 
@@ -350,7 +352,7 @@ async def _create_volume(cfg, user_input: str) -> str:
 
 # --- 元数据回填 ---
 
-async def _handle_metadata_backfill(request: Request, user_input: str) -> str:
+async def _handle_metadata_backfill(request: Request, user_input: str, novel_id: int = 1) -> str:
     """处理元数据回填对话"""
     cfg = request.app.state.config
 
@@ -362,7 +364,7 @@ async def _handle_metadata_backfill(request: Request, user_input: str) -> str:
     elif "全部" in user_input or "all" in user_input.lower():
         # 统计缺失
         from pathlib import Path
-        output_dir = cfg.resolve_output_dir()
+        output_dir = cfg.resolve_output_dir(novel_id)
         missing_count = 0
         total = 0
         for ch_dir in sorted(output_dir.iterdir()):

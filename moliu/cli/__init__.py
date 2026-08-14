@@ -8,6 +8,7 @@ import typer
 
 from .steps import check_continue, step_characters, step_direction, step_narrator, step_world
 from .utils import QuickstartRollback, load_characters, load_config, load_narrator, load_world
+from moliu.config import Config
 from moliu.engines.generator import Generator
 from moliu.engines.gateway import DeepSeekGateway
 from moliu.engines.usage import UsageTracker
@@ -36,7 +37,10 @@ def status():
     characters = load_characters(config)
     world = load_world(config)
     output_dir = config.resolve_output_dir()
-    existing_chapters = sorted(output_dir.glob("第*章"))
+    existing_chapters = sorted(
+        d for d in output_dir.iterdir()
+        if d.is_dir() and Config.parse_chapter_num(d.name) is not None
+    )
 
     typer.echo("=== 墨流 项目状态 ===")
     typer.echo(f"世界观: {'[OK] 已设置' if world else '[MISS] 未创建'}")
@@ -249,7 +253,7 @@ def write(
         pipeline.save_to_memory(chapter_num, result, clean_summary, emotion, characters)
         pipeline.save_rhythm_record(chapter_num, result, qr, chapter_type, emotion)
 
-        filepath = config.resolve_output_dir() / f"第{chapter_num}章" / "正文.md"
+        filepath = config.resolve_output_dir() / Config.chapter_dir_name(chapter_num) / "正文.md"
         return result, filepath
 
     try:
@@ -276,13 +280,14 @@ def write(
     typer.echo(f"   开头: {result.content[:80]}...")
     typer.echo(f"   保存: {filepath}")
 
-    # 同步到墨脉图（可选，未配置则跳过；失败只警告不阻塞）
+    # 同步到墨脉图（可选,默认禁用 — 内建关系图谱已覆盖核心功能)
+    # 启用方法:在 .env 配置 MO_MOMAITU_* 三项
     if config.is_momaitu_enabled():
         try:
             from moliu.sync.hooks import sync_chapter_artifacts
             asyncio.run(sync_chapter_artifacts(config, chapter_num, result, qr, emotion, characters))
         except Exception as e:
-            typer.echo(f"[WARN] 墨脉图同步异常: {e}")
+            typer.echo(f"[WARN] 墨脉图同步异常(已自动降级为本地图谱): {e}")
 
 
 @app.command()
@@ -409,7 +414,7 @@ def quickstart(
     typer.echo(f"\n下一步: mo write 1 \"第一章的节拍描述\"")
     typer.echo("=" * 50)
 
-    # 同步到墨脉图（可选，未配置则跳过；失败只警告不阻塞）
+    # 同步到墨脉图（可选,默认禁用 — 内建关系图谱已覆盖核心功能)
     if config.is_momaitu_enabled():
         try:
             from moliu.sync.hooks import sync_quickstart_artifacts
@@ -420,7 +425,7 @@ def quickstart(
                 narrator_md_path=data_dir / "narrator.md",
             ))
         except Exception as e:
-            typer.echo(f"[WARN] 墨脉图同步异常: {e}")
+            typer.echo(f"[WARN] 墨脉图同步异常(已自动降级为本地图谱): {e}")
 
 
 @app.command()
@@ -434,7 +439,7 @@ def retry_segment(
     generator = Generator(config, gateway, prompts)
 
     from moliu.memory.store import MemoryStore
-    from moliu.memory.retriever import Retriever
+    from moliu.context.assembler import StructuredAssembler
     from moliu.engines.checker import ConsistencyChecker
     from moliu.engines.reader_eval import ReaderEvaluator
     from moliu.rules.rhythm_tracker import RhythmTracker
@@ -442,7 +447,7 @@ def retry_segment(
     from moliu.engines.usage import UsageTracker
 
     memory = MemoryStore(str(config.resolve_data_dir() / "memory_db"))
-    retriever = Retriever(config, memory)
+    retriever = StructuredAssembler(config)
     checker = ConsistencyChecker(gateway)
     reader = ReaderEvaluator(gateway)
     tracker = RhythmTracker(config.resolve_data_dir())
@@ -532,7 +537,7 @@ def retry_segment(
 
         # 清理临时分段文件
         pipeline.generator._clear_segments(chapter_num)
-        return result, config.resolve_output_dir() / f"第{chapter_num}章" / "正文.md"
+        return result, config.resolve_output_dir() / Config.chapter_dir_name(chapter_num) / "正文.md"
     
     try:
         result, filepath = asyncio.run(_async_retry())
@@ -628,7 +633,7 @@ def check(
     config = load_config()
 
     output_dir = config.resolve_output_dir()
-    chapter_path = output_dir / f"第{chapter_num}章" / "正文.md"
+    chapter_path = output_dir / Config.chapter_dir_name(chapter_num) / "正文.md"
     if not chapter_path.exists():
         typer.echo(f"[ERROR] 第{chapter_num}章不存在")
         raise typer.Exit(code=1)
@@ -672,7 +677,7 @@ def check(
             typer.echo(f"张力评分: {tension}/10")
 
             # 保存报告
-            report_path = output_dir / f"第{chapter_num}章" / "质量报告.md"
+            report_path = output_dir / Config.chapter_dir_name(chapter_num) / "质量报告.md"
             lines = [
                 f"# 第{chapter_num}章 质检报告",
                 "",
@@ -761,13 +766,14 @@ def backfill(
     # 解析章节范围
     chapter_range = chapter_range.strip()
     if chapter_range == "all":
-        existing = sorted(output_dir.glob("第*章"))
+        existing = sorted(output_dir.iterdir())
         nums = []
         for d in existing:
-            try:
-                nums.append(int(d.name.replace("第", "").replace("章", "")))
-            except ValueError:
+            if not d.is_dir():
                 continue
+            ch = Config.parse_chapter_num(d.name)
+            if ch is not None:
+                nums.append(ch)
         if not nums:
             typer.echo("[!] 没有找到任何章节")
             raise typer.Exit(code=1)

@@ -6,18 +6,16 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-router = APIRouter()
+from moliu.api.locks import novel_lock
 
-# 文件读写锁 — 防止并发请求导致读改写丢数据
-_rel_lock = asyncio.Lock()
+router = APIRouter()
 
 
 # --- 25 种预设关系类型 ---
@@ -170,19 +168,26 @@ def _load_characters_map(data_dir: Path) -> dict[str, dict]:
 # --- 路由 ---
 
 @router.get("/relationships", response_model=list[RelationshipItem])
-async def list_relationships(request: Request):
+async def list_relationships(
+    request: Request,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取所有关系"""
     cfg = request.app.state.config
-    items = _get_relationships(cfg.resolve_data_dir())
+    items = _get_relationships(cfg.resolve_data_dir(novel_id))
     return [RelationshipItem(**e) for e in items]
 
 
 @router.post("/relationships", response_model=RelationshipItem, status_code=201)
-async def create_relationship(request: Request, body: RelationshipCreate):
+async def create_relationship(
+    request: Request,
+    body: RelationshipCreate,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """新建关系"""
     cfg = request.app.state.config
-    async with _rel_lock:
-        items = _get_relationships(cfg.resolve_data_dir())
+    async with novel_lock(novel_id):
+        items = _get_relationships(cfg.resolve_data_dir(novel_id))
 
         # 查预设类型，自动补 category 和 directed
         preset = next((p for p in PRESET_REL_TYPES if p["type_name"] == body.rel_type), None)
@@ -209,16 +214,21 @@ async def create_relationship(request: Request, body: RelationshipCreate):
             "end_chapter": body.end_chapter,
         }
         items.append(new_item)
-        _save_relationships(cfg.resolve_data_dir(), items)
+        _save_relationships(cfg.resolve_data_dir(novel_id), items)
     return RelationshipItem(**new_item)
 
 
 @router.put("/relationships/{rel_id}", response_model=RelationshipItem)
-async def update_relationship(request: Request, rel_id: int, body: RelationshipUpdate):
+async def update_relationship(
+    request: Request,
+    rel_id: int,
+    body: RelationshipUpdate,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """更新关系"""
     cfg = request.app.state.config
-    async with _rel_lock:
-        items = _get_relationships(cfg.resolve_data_dir())
+    async with novel_lock(novel_id):
+        items = _get_relationships(cfg.resolve_data_dir(novel_id))
 
         for e in items:
             if e.get("id") == rel_id:
@@ -231,23 +241,27 @@ async def update_relationship(request: Request, rel_id: int, body: RelationshipU
                 if body.description is not None: e["description"] = body.description
                 if body.start_chapter is not None: e["start_chapter"] = body.start_chapter
                 if body.end_chapter is not None: e["end_chapter"] = body.end_chapter
-                _save_relationships(cfg.resolve_data_dir(), items)
+                _save_relationships(cfg.resolve_data_dir(novel_id), items)
                 return RelationshipItem(**e)
 
         raise HTTPException(status_code=404, detail=f"关系 {rel_id} 不存在")
 
 
 @router.delete("/relationships/{rel_id}", status_code=204)
-async def delete_relationship(request: Request, rel_id: int):
+async def delete_relationship(
+    request: Request,
+    rel_id: int,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """删除关系"""
     cfg = request.app.state.config
-    async with _rel_lock:
-        items = _get_relationships(cfg.resolve_data_dir())
+    async with novel_lock(novel_id):
+        items = _get_relationships(cfg.resolve_data_dir(novel_id))
 
         for i, e in enumerate(items):
             if e.get("id") == rel_id:
                 items.pop(i)
-                _save_relationships(cfg.resolve_data_dir(), items)
+                _save_relationships(cfg.resolve_data_dir(novel_id), items)
                 return
 
         raise HTTPException(status_code=404, detail=f"关系 {rel_id} 不存在")
@@ -268,13 +282,16 @@ async def list_rel_types():
 
 
 @router.get("/graph", response_model=GraphData)
-async def get_graph(request: Request):
+async def get_graph(
+    request: Request,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取图谱数据 — 节点（角色）+ 边（关系）
 
     供前端 ECharts 力导向图直接渲染。
     """
     cfg = request.app.state.config
-    data_dir = cfg.resolve_data_dir()
+    data_dir = cfg.resolve_data_dir(novel_id)
 
     relationships = _get_relationships(data_dir)
     chars_map = _load_characters_map(data_dir)

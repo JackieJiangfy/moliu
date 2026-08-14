@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from moliu.api.locks import novel_lock
 from moliu.data.schemas import WorldSetting
 
 router = APIRouter()
@@ -29,10 +30,13 @@ class WorldUpdate(BaseModel):
 
 
 @router.get("/world", response_model=WorldResponse)
-async def get_world(request: Request):
+async def get_world(
+    request: Request,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取世界观"""
     cfg = request.app.state.config
-    world_path = cfg.resolve_data_dir() / "world" / "world.yaml"
+    world_path = cfg.resolve_data_dir(novel_id) / "world" / "world.yaml"
 
     if not world_path.exists():
         return WorldResponse()
@@ -48,28 +52,33 @@ async def get_world(request: Request):
 
 
 @router.put("/world", response_model=WorldResponse)
-async def update_world(request: Request, body: WorldUpdate):
+async def update_world(
+    request: Request,
+    body: WorldUpdate,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """更新世界观"""
     cfg = request.app.state.config
-    world_path = cfg.resolve_data_dir() / "world" / "world.yaml"
+    world_path = cfg.resolve_data_dir(novel_id) / "world" / "world.yaml"
 
-    if world_path.exists():
-        world = WorldSetting.from_yaml(world_path)
-    else:
-        world = WorldSetting()
+    async with novel_lock(novel_id):
+        if world_path.exists():
+            world = WorldSetting.from_yaml(world_path)
+        else:
+            world = WorldSetting()
 
-    if body.world_name is not None:
-        world.world_name = body.world_name
-    if body.era is not None:
-        world.era = body.era
-    if body.genre is not None:
-        world.genre = body.genre
-    if body.key_constraints is not None:
-        world.key_constraints = body.key_constraints
-    if body.summary is not None:
-        world.summary = body.summary
+        if body.world_name is not None:
+            world.world_name = body.world_name
+        if body.era is not None:
+            world.era = body.era
+        if body.genre is not None:
+            world.genre = body.genre
+        if body.key_constraints is not None:
+            world.key_constraints = body.key_constraints
+        if body.summary is not None:
+            world.summary = body.summary
 
-    world.to_yaml(world_path)
+        world.to_yaml(world_path)
 
     return WorldResponse(
         world_name=world.world_name or "",

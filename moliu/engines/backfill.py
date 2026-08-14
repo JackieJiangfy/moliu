@@ -78,8 +78,7 @@ class MetadataBackfiller:
             dict: 回填后的字段值
         """
         output_dir = self.config.resolve_output_dir()
-        chapter_dir = output_dir / f"第{chapter_num}章"
-
+        chapter_dir = output_dir / Config.chapter_dir_name(chapter_num)
         content_path = chapter_dir / "正文.md"
         if not content_path.exists():
             raise FileNotFoundError(f"第{chapter_num}章正文不存在: {content_path}")
@@ -211,10 +210,11 @@ def scan_missing_metadata(output_dir: Path) -> list[dict]:
         list[dict]: [{chapter_num, missing_title, missing_emotion, missing_events}]
     """
     results = []
-    for chapter_dir in sorted(output_dir.glob("第*章")):
-        try:
-            ch_num = int(chapter_dir.name.replace("第", "").replace("章", ""))
-        except ValueError:
+    for chapter_dir in sorted(output_dir.iterdir()):
+        if not chapter_dir.is_dir():
+            continue
+        ch_num = Config.parse_chapter_num(chapter_dir.name)
+        if ch_num is None:
             continue
 
         meta_path = chapter_dir / "meta.json"

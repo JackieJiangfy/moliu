@@ -36,6 +36,7 @@ class CharacterState(BaseModel):
     physical_state: str = ""
     resources: list[str] = Field(default_factory=list)
     known_info: list[str] = Field(default_factory=list)
+    last_chapter_appeared: int = 0   # 最后出场章节号(0=未出场) — 供图谱上下文使用
 
 
 class Appearance(BaseModel):
@@ -595,6 +596,45 @@ class VolumeIndex(BaseModel):
 
     def to_json(self, path: Path) -> None:
         import json
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(self.model_dump(), f, ensure_ascii=False, indent=2)
+
+
+# === 小说实体(多本支持) ===
+
+class Novel(BaseModel):
+    """小说实体 — 平台支持多本小说,每本独立数据目录"""
+    id: int
+    title: str
+    subtitle: str = ""
+    genre: str = ""                          # 题材:都市/玄幻/科幻...
+    premise: str = ""                        # 一句话核心设定
+    target_chapters: int = 1000
+    status: str = "planned"                  # planned / active / completed / archived
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class NovelIndex(BaseModel):
+    """小说索引 — data/novels/index.json,管理所有小说"""
+    novels: list[Novel] = Field(default_factory=list)
+    next_id: int = 1
+
+    def get(self, novel_id: int) -> Novel | None:
+        return next((n for n in self.novels if n.id == novel_id), None)
+
+    @classmethod
+    def from_json(cls, path: Path) -> "NovelIndex":
+        import json
+        if not path.exists():
+            return cls()
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls(**data)
+
+    def to_json(self, path: Path) -> None:
+        import json
+        path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.model_dump(), f, ensure_ascii=False, indent=2)
 

@@ -15,7 +15,7 @@ from fastapi.responses import RedirectResponse
 
 from moliu.config import Config
 
-from .routes import status, volumes, chapters, characters, world, foreshadows, openai_compat
+from .routes import status, volumes, chapters, characters, world, foreshadows, relationships, novels, openai_compat
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -45,6 +45,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.config = config
 
     # 数据 CRUD 路由
+    app.include_router(novels.router, prefix="/api/v1", tags=["小说"])
     app.include_router(status.router, prefix="/api/v1", tags=["状态"])
     app.include_router(volumes.router, prefix="/api/v1", tags=["卷管理"])
     app.include_router(chapters.router, prefix="/api/v1", tags=["章节"])

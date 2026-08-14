@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
+
+from moliu.config import Config
 
 router = APIRouter()
 
@@ -25,11 +27,14 @@ class ProjectStatus(BaseModel):
 
 
 @router.get("/status", response_model=ProjectStatus)
-async def get_status(request: Request):
+async def get_status(
+    request: Request,
+    novel_id: int = Query(1, description="小说ID"),
+):
     """获取项目概览"""
     cfg = request.app.state.config
-    data_dir = cfg.resolve_data_dir()
-    output_dir = cfg.resolve_output_dir()
+    data_dir = cfg.resolve_data_dir(novel_id)
+    output_dir = cfg.resolve_output_dir(novel_id)
 
     # 小说名
     novel_title = ""
@@ -39,8 +44,11 @@ async def get_status(request: Request):
         data = json.loads(vol_index_path.read_text(encoding="utf-8"))
         novel_title = data.get("novel_title", "")
 
-    # 章节
-    existing = sorted(output_dir.glob("第*章"))
+    # 章节(同时匹配新格式 chapter_NNNN 和旧格式 第N章)
+    existing = sorted(
+        d for d in output_dir.iterdir()
+        if d.is_dir() and Config.parse_chapter_num(d.name) is not None
+    )
     total_chapters = len(existing)
     latest_chapter = 0
     total_words = 0
@@ -49,11 +57,10 @@ async def get_status(request: Request):
     missing_events = 0
 
     for d in existing:
-        try:
-            ch = int(d.name.replace("第", "").replace("章", ""))
-            latest_chapter = max(latest_chapter, ch)
-        except ValueError:
+        ch = Config.parse_chapter_num(d.name)
+        if ch is None:
             continue
+        latest_chapter = max(latest_chapter, ch)
 
         # 字数统计
         content_file = d / "正文.md"

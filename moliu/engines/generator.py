@@ -35,8 +35,9 @@ def count_words(text: str) -> int:
 class Generator:
     """章节生成器 — Phase 1：单次调用，不分段"""
 
-    def __init__(self, config: Config, gateway: DeepSeekGateway, prompts: PromptManager):
+    def __init__(self, config: Config, gateway: DeepSeekGateway, prompts: PromptManager, *, novel_id: int = 1):
         self.config = config
+        self.novel_id = novel_id
         self.gateway = gateway
         self.prompts = prompts
 
@@ -54,19 +55,19 @@ class Generator:
         if chapter_num <= 1:
             return ""
 
-        output_dir = self.config.resolve_output_dir()
+        output_dir = self.config.resolve_output_dir(self.novel_id)
         recent_chapters = []
         start_chapter = max(1, chapter_num - max_chapters)
 
         for num in range(start_chapter, chapter_num):
-            meta_path = output_dir / f"第{num}章" / "meta.json"
+            meta_path = output_dir / Config.chapter_dir_name(num) / "meta.json"
             if meta_path.exists():
                 try:
                     meta = ChapterMeta.from_json(meta_path)
                     recent_chapters.append(meta.to_context())
                 except Exception:
                     # 如果 meta.json 解析失败，尝试从正文提取
-                    text_path = output_dir / f"第{num}章" / "正文.md"
+                    text_path = output_dir / Config.chapter_dir_name(num) / "正文.md"
                     if text_path.exists():
                         content = text_path.read_text(encoding="utf-8")
                         summary = self._extract_summary_from_text(content, num)
@@ -591,7 +592,7 @@ class Generator:
 
     def _get_segment_dir(self, chapter_num: int) -> Path:
         """获取分段临时文件目录"""
-        segment_dir = self.config.resolve_data_dir() / f"chapter_{chapter_num:03d}" / "segments"
+        segment_dir = self.config.resolve_data_dir(self.novel_id) / f"chapter_{chapter_num:03d}" / "segments"
         segment_dir.mkdir(parents=True, exist_ok=True)
         return segment_dir
 
@@ -741,7 +742,7 @@ class Generator:
         Returns:
             下一个版本号
         """
-        output_dir = self.config.resolve_output_dir() / f"第{chapter_num}章"
+        output_dir = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(chapter_num)
         versions_dir = output_dir / "versions"
 
         if not versions_dir.exists():
@@ -804,7 +805,7 @@ class Generator:
         """
         import datetime
 
-        output_dir = self.config.resolve_output_dir() / f"第{result.chapter_num}章"
+        output_dir = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(result.chapter_num)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         # 确定版本号
@@ -886,7 +887,7 @@ class Generator:
         """
         import datetime
 
-        output_dir = self.config.resolve_output_dir() / f"第{chapter_num}章"
+        output_dir = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(chapter_num)
         history_file = output_dir / "version_history.json"
 
         # 读取现有历史
@@ -929,7 +930,7 @@ class Generator:
         Returns:
             版本列表 [(版本号, 时间戳, 摘要), ...]
         """
-        output_dir = self.config.resolve_output_dir() / f"第{chapter_num}章"
+        output_dir = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(chapter_num)
         history_file = output_dir / "version_history.json"
 
         if not history_file.exists():
@@ -954,7 +955,7 @@ class Generator:
         Returns:
             是否恢复成功
         """
-        output_dir = self.config.resolve_output_dir() / f"第{chapter_num}章"
+        output_dir = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(chapter_num)
         version_dir = output_dir / "versions" / f"v{version}"
 
         if not version_dir.exists():
@@ -989,7 +990,7 @@ class Generator:
             chapter_num: 章节号
         """
         # 设置备份路径
-        backup_path = self.config.resolve_output_dir()
+        backup_path = self.config.resolve_output_dir(self.novel_id)
 
         for character in characters:
             # 设置备份路径
@@ -1001,6 +1002,10 @@ class Generator:
             # 从正文中提取状态变化并更新（使用严格模式，减少误判）
             character.update_state_from_text(content, strict=True)
 
+            # 记录最后出场章节(供内建图谱上下文使用)
+            if character.state:
+                character.state.last_chapter_appeared = chapter_num
+
             # 保存更新后的角色卡到角色目录
             self._save_character(character)
 
@@ -1008,9 +1013,18 @@ class Generator:
         """
         保存角色卡到角色目录
 
+        同时写入 data/novels/{id}/characters/(源数据,供下次加载)
+        和 output/novels/{id}/chapters/characters/(生成快照)。
+
         Args:
             character: 角色卡
         """
-        output_dir = self.config.resolve_output_dir() / "characters"
+        # 1. 源数据目录 — 后续 load_characters / inject_graph_context 从这里读
+        data_chars = self.config.resolve_data_dir(self.novel_id) / "characters"
+        data_chars.mkdir(parents=True, exist_ok=True)
+        character.to_yaml(data_chars / f"{character.name}.yaml")
+
+        # 2. 输出快照目录(保留兼容)
+        output_dir = self.config.resolve_output_dir(self.novel_id) / "characters"
         output_dir.mkdir(parents=True, exist_ok=True)
         character.to_yaml(output_dir / f"{character.name}.yaml")
