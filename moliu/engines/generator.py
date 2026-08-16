@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from pathlib import Path
 
@@ -9,6 +11,30 @@ from moliu.config import Config
 from moliu.data.schemas import ChapterMeta, ChapterResult, CharacterCard, NarratorCard, WorldSetting
 from moliu.engines.gateway import DeepSeekGateway
 from moliu.prompts.manager import PromptManager
+
+
+logger = logging.getLogger(__name__)
+
+
+class SegmentGenerationError(Exception):
+    """分段生成中某段调用失败(已保存前序段,可用 resume_from 恢复)
+
+    Attributes:
+        chapter_num: 失败的章节号
+        failed_segment: 失败的段名 ("middle" / "ending")
+        resume_from: 下次重试应传入的 resume_from 值
+    """
+
+    def __init__(self, chapter_num: int, failed_segment: str, cause: Exception) -> None:
+        self.chapter_num = chapter_num
+        self.failed_segment = failed_segment
+        # 失败段就是下次重试的起点(前序段已落盘)
+        self.resume_from = failed_segment
+        self.__cause__ = cause
+        super().__init__(
+            f"第{chapter_num}章 {failed_segment} 段生成失败: {cause}. "
+            f"前序段已保存,可用 resume_from=\"{failed_segment}\" 或 `mo resume` 恢复."
+        )
 
 
 def count_words(text: str) -> int:
@@ -76,6 +102,59 @@ class Generator:
         if recent_chapters:
             return "\n\n".join(recent_chapters)
         return ""
+
+    def _build_global_progress(self, chapter_num: int) -> str:
+        """构造全局进度感知块(问题10)
+
+        从 NovelIndex 加载本书的 target_chapters 与已完成章节数,
+        生成一段提示,让 LLM 意识到"现在是全书第 X 章,共 Y 章"。
+
+        失败时返回空字符串(优雅降级,不阻断生成)。
+        """
+        try:
+            from moliu.data.schemas import NovelIndex
+            index_path = self.config.resolve_novel_index_path()
+            if not index_path.exists():
+                return ""
+            index = NovelIndex.from_json(index_path)
+            novel = index.get(self.novel_id)
+            if novel is None or novel.target_chapters <= 0:
+                return ""
+
+            total = novel.target_chapters
+            # 统计已完成章节数(目录存在即视为已生成)
+            output_dir = self.config.resolve_output_dir(self.novel_id)
+            done = 0
+            if output_dir.exists():
+                done = sum(
+                    1 for d in output_dir.iterdir()
+                    if d.is_dir() and Config.parse_chapter_num(d.name) is not None
+                )
+
+            pct = round(done / total * 100, 1)
+            remaining = max(0, total - chapter_num)
+
+            # 进度提示语
+            phase = "开篇阶段"
+            if chapter_num >= total * 0.8:
+                phase = "收尾阶段"
+            elif chapter_num >= total * 0.5:
+                phase = "下半场"
+            elif chapter_num >= total * 0.25:
+                phase = "中段推进"
+
+            lines = [
+                f"【全局进度感知】当前是全书第 {chapter_num} 章,计划共 {total} 章。",
+                f"已完成约 {done} 章({pct}%),当前处于 {phase},距全书结束还有 {remaining} 章。",
+                "请据此把握节奏:开篇阶段重点建立世界观与角色,中段推进主线与冲突,收尾阶段收束伏笔与悬念。",
+            ]
+            return "\n".join(lines)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).debug(
+                "全局进度感知加载失败 novel=%s ch=%d: %s", self.novel_id, chapter_num, e,
+            )
+            return ""
 
     async def _generate_summary_with_llm(self, content: str, chapter_num: int) -> str:
         """
@@ -177,6 +256,9 @@ class Generator:
         if auto_recent and not recent_chapters:
             recent_chapters = self.load_recent_chapters(chapter_num)
 
+        # 全局进度感知(问题10):注入章节数/总目标/进度百分比到 LLM
+        global_progress = self._build_global_progress(chapter_num)
+
         # 解析章节类型 (LLM 优先，回退启发式)
         chapter_type = await self._resolve_chapter_type_with_llm(chapter_num, chapter_type, beat)
 
@@ -194,6 +276,7 @@ class Generator:
                 chapter_type=chapter_type,
                 resume_from=resume_from,
                 memory_context=memory_context,
+                global_progress=global_progress,
             )
         else:
             return await self._generate_chapter_single(
@@ -208,6 +291,7 @@ class Generator:
                 temperature=temperature,
                 chapter_type=chapter_type,
                 memory_context=memory_context,
+                global_progress=global_progress,
             )
 
     def _resolve_chapter_type(self, chapter_num: int, chapter_type: str) -> str:
@@ -367,6 +451,7 @@ class Generator:
         temperature: float | None = None,
         chapter_type: str = "normal",
         memory_context: str = "",
+        global_progress: str = "",
     ) -> ChapterResult:
         """
         单次调用生成一章（原始模式）
@@ -416,6 +501,7 @@ class Generator:
             beat=beat,
             last_emotion=last_emotion,
             recent_chapters=recent_chapters,
+            global_progress=global_progress,
         )
 
         # 调用 API
@@ -450,6 +536,7 @@ class Generator:
         chapter_type: str = "normal",
         resume_from: str | None = None,  # "middle" 或 "ending"，用于重试
         memory_context: str = "",
+        global_progress: str = "",
     ) -> ChapterResult:
         """
         分段生成一章（三幕结构：opening/middle/ending）
@@ -513,13 +600,14 @@ class Generator:
                 beat=f"{beat} — 开场部分",
                 last_emotion=last_emotion,
                 recent_chapters=recent_chapters,
+                global_progress=global_progress,
             )
 
             opening_content, opening_tokens = await self.gateway.generate(
                 system_prompt=opening_system,
                 user_prompt=opening_user,
                 temperature=temperature,
-                max_tokens=2048,
+                max_tokens=4096,
             )
             total_tokens += opening_tokens
             
@@ -539,8 +627,10 @@ class Generator:
         )
 
         if not middle_content:  # 只有在没有恢复内容时才生成
-            # 发展部分：使用开场内容的情绪（从开场提取或默认），不传前文（这是本章内部）
-            opening_emotion = self._extract_emotion_from_text(opening_content) or last_emotion
+            # 发展部分：使用开场内容的情绪（问题4: 优先 LLM 提取,失败降级规则版）
+            opening_emotion = await self._extract_emotion_with_llm(opening_content) \
+                or self._extract_emotion_from_text(opening_content) \
+                or last_emotion
             middle_user = self.prompts.render(
                 "chapter_generate.user.j2",
                 chapter_num=chapter_num,
@@ -548,15 +638,17 @@ class Generator:
                 last_emotion=opening_emotion,
                 recent_chapters="",  # 本章内部分段，不传前文
             )
-
-            middle_content, middle_tokens = await self.gateway.generate(
+            # 问题2: middle 段失败时自动重试 1 次,仍失败则抛 SegmentGenerationError
+            # opening 已落盘,后续可用 resume_from="middle" 恢复
+            middle_content, middle_tokens = await self._generate_segment_with_retry(
+                segment_name="middle",
+                chapter_num=chapter_num,
                 system_prompt=middle_system,
                 user_prompt=middle_user,
                 temperature=temperature,
-                max_tokens=2048,
             )
             total_tokens += middle_tokens
-            
+
             # 保存中间结果
             self._save_segment(chapter_num, "middle", middle_content)
 
@@ -572,8 +664,10 @@ class Generator:
             chapter_guidance=chapter_guidance,
         )
 
-        # 结尾部分：使用发展部分的情绪，不传前文
-        middle_emotion = self._extract_emotion_from_text(middle_content) or opening_emotion
+        # 结尾部分：使用发展部分的情绪（问题4: 优先 LLM 提取）
+        middle_emotion = await self._extract_emotion_with_llm(middle_content) \
+            or self._extract_emotion_from_text(middle_content) \
+            or opening_emotion
         ending_user = self.prompts.render(
             "chapter_generate.user.j2",
             chapter_num=chapter_num,
@@ -582,14 +676,15 @@ class Generator:
             recent_chapters="",  # 本章内部分段，不传前文
         )
 
-        ending_content, ending_tokens = await self.gateway.generate(
+        ending_content, ending_tokens = await self._generate_segment_with_retry(
+            segment_name="ending",
+            chapter_num=chapter_num,
             system_prompt=ending_system,
             user_prompt=ending_user,
             temperature=temperature,
-            max_tokens=2048,
         )
         total_tokens += ending_tokens
-        
+
         # 保存中间结果
         self._save_segment(chapter_num, "ending", ending_content)
 
@@ -604,6 +699,50 @@ class Generator:
             model_used=self.config.deepseek_model,
             tokens_used=total_tokens,
         )
+
+    async def _generate_segment_with_retry(
+        self,
+        *,
+        segment_name: str,
+        chapter_num: int,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float | None = None,
+        max_retries: int = 1,
+        retry_delay: float = 1.0,
+    ) -> tuple[str, int]:
+        """问题2: 分段生成调用 LLM,失败时自动重试 1 次
+
+        - 失败原因多为网络抖动/限流/服务端 5xx,短暂等待后重试通常能成功
+        - 仍失败时抛 SegmentGenerationError,前序段已落盘,可 resume_from 恢复
+        - opening 段不在此方法内(因为 opening 失败时无前序段,直接抛原异常即可)
+        """
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                content, tokens = await self.gateway.generate(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                    max_tokens=4096,
+                )
+                return content, tokens
+            except Exception as e:
+                last_exc = e
+                if attempt < max_retries:
+                    logger.warning(
+                        "第%d章 %s 段生成失败(第%d次尝试): %s,%.1fs 后重试",
+                        chapter_num, segment_name, attempt + 1, e, retry_delay,
+                    )
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(
+                        "第%d章 %s 段生成失败(已重试%d次): %s",
+                        chapter_num, segment_name, max_retries, e,
+                    )
+        # 重试耗尽,抛出带 resume_from 信息的异常
+        assert last_exc is not None
+        raise SegmentGenerationError(chapter_num, segment_name, last_exc)
 
     def _get_segment_dir(self, chapter_num: int) -> Path:
         """获取分段临时文件目录"""
@@ -655,6 +794,39 @@ class Generator:
         if segment_dir.exists():
             import shutil
             shutil.rmtree(segment_dir, ignore_errors=True)
+
+    async def _extract_emotion_with_llm(self, content: str) -> str | None:
+        """问题4: 用 LLM 提取情绪标签(更精准),失败时返回 None 降级到规则版
+
+        优势:
+        - 规则版只能识别预定义关键词,无法处理隐喻/情境情绪
+        - LLM 能理解上下文(如"他攥紧拳头,指节发白"→愤怒)
+        - 支持复合情绪(如"紧张→愤怒→释然")
+
+        Returns:
+            情绪标签字符串,LLM 调用失败时返回 None(由调用方降级)
+        """
+        # 只取末尾 400 字(反映段落收尾情绪,用于衔接下一段)
+        text = content[-400:] if len(content) > 400 else content
+        try:
+            resp, _ = await self.gateway.generate(
+                system_prompt=(
+                    "你是小说编辑助手。分析文本的情感基调。"
+                    "只输出一个中文情绪词(如紧张/轻松/悲伤/愤怒/惊喜/危险/神秘),"
+                    "或用'→'连接的情绪变化轨迹(2-3个词)。不要输出其他内容。"
+                ),
+                user_prompt=f"分析以下文本的情绪:\n\n{text}",
+                max_tokens=30,
+                temperature=0.3,
+            )
+            emotion = resp.strip().strip(""""'""")
+            # 简单校验:非空且长度合理(1-30字)
+            if emotion and 1 <= len(emotion) <= 30:
+                return emotion
+            return None
+        except Exception as e:
+            logger.debug("LLM 情绪提取失败,降级到规则版: %s", e)
+            return None
 
     def _extract_emotion_from_text(self, content: str) -> str | None:
         """
@@ -711,6 +883,12 @@ class Generator:
         """
         合并三部分内容，处理重复和过渡
 
+        问题5: 优化去重逻辑
+        - 扩大检查窗口(50→200 字),捕捉更长重复
+        - 用最大重叠子串匹配(而非简单包含),能处理部分重叠
+        - 在句子边界对齐(避免截断句子)
+        - 最小重叠阈值 10 字,避免误删短句
+
         Args:
             opening: 开场部分
             middle: 发展部分
@@ -720,32 +898,80 @@ class Generator:
             合并后的完整章节内容
         """
         segments = [opening.strip(), middle.strip(), ending.strip()]
-
-        # 移除每段末尾的换行
         segments = [s.rstrip("\n") for s in segments]
 
-        # 检查重复（如果某段的开头与前一段的结尾重复，进行去重）
         result = []
         for i, segment in enumerate(segments):
             if i == 0:
                 result.append(segment)
-            else:
-                # 检查当前段是否与前一段有重复
-                prev_end = result[-1][-50:] if len(result[-1]) > 50 else result[-1]
-                curr_start = segment[:50] if len(segment) > 50 else segment
+                continue
+            # 问题5: 用改进的去重逻辑合并
+            merged = self._deduplicate_overlap(result[-1], segment)
+            result[-1], deduped_segment = merged
+            if deduped_segment:
+                result.append(deduped_segment)
 
-                if prev_end and curr_start and curr_start in prev_end:
-                    # 当前段开头与前段结尾重复，跳过重复部分
-                    result.append(segment[len(curr_start):].strip())
-                elif prev_end and curr_start and prev_end in curr_start:
-                    # 前段结尾在当前段开头中，跳过重复
-                    overlap = len(prev_end)
-                    result.append(segment[overlap:].strip())
-                else:
-                    result.append(segment)
-
-        # 用两个换行连接各段
         return "\n\n\n".join([s for s in result if s])
+
+    def _deduplicate_overlap(self, prev: str, curr: str) -> tuple[str, str]:
+        """问题5: 找出 prev 结尾与 curr 开头的最大重叠并去重
+
+        策略:
+        1. 取 prev 末尾和 curr 开头各 200 字作为搜索窗口
+        2. 找最大公共子串(前段结尾 == 后段开头)
+        3. 若重叠 >= 10 字,在句子边界对齐后去除
+        4. 返回 (去重后的 prev, 去重后的 curr)
+
+        Args:
+            prev: 前一段内容
+            curr: 当前段内容
+
+        Returns:
+            (prev_trimmed, curr_trimmed)
+        """
+        if not prev or not curr:
+            return prev, curr
+
+        window = 200
+        prev_tail = prev[-window:] if len(prev) > window else prev
+        curr_head = curr[:window] if len(curr) > window else curr
+
+        # 找最大重叠:prev_tail 的后缀 == curr_head 的前缀
+        max_overlap = 0
+        min_overlap = 10  # 最小阈值,避免误删短词
+        check_len = min(len(prev_tail), len(curr_head))
+
+        for length in range(check_len, min_overlap - 1, -1):
+            if prev_tail[-length:] == curr_head[:length]:
+                max_overlap = length
+                break
+
+        if max_overlap == 0:
+            return prev, curr
+
+        # 在句子边界对齐(避免截断句子)
+        overlap_text = curr_head[:max_overlap]
+        # 找重叠区域中最后一个句子结束符(。！？…)
+        sentence_end_chars = "。！？…"
+        last_sentence_end = -1
+        for idx, ch in enumerate(overlap_text):
+            if ch in sentence_end_chars:
+                last_sentence_end = idx
+
+        if last_sentence_end >= 0 and last_sentence_end < max_overlap - 3:
+            # 在句子边界切分,保留完整句子在前段
+            # 前 0~last_sentence_end 留给 prev,后面给 curr
+            cut_in_curr = last_sentence_end + 1
+            # 从 prev 末尾移除重叠部分(保留到句子结束)
+            prev_keep_len = len(prev) - (max_overlap - cut_in_curr)
+            prev_trimmed = prev[:prev_keep_len].rstrip()
+            curr_trimmed = curr[cut_in_curr:].lstrip()
+        else:
+            # 无合适句子边界,直接在重叠处切分
+            prev_trimmed = prev[:len(prev) - max_overlap].rstrip()
+            curr_trimmed = curr[max_overlap:].lstrip()
+
+        return prev_trimmed, curr_trimmed
 
     def _get_next_version(self, chapter_num: int) -> int:
         """

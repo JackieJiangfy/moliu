@@ -1,6 +1,8 @@
 ## 本章写作任务
 
-上一章收尾情绪：{{ last_emotion }}
+{% if global_progress is defined and global_progress %}{{ global_progress }}
+
+{% endif %}上一章收尾情绪：{{ last_emotion }}
 
 请承接这个情绪，写第 {{ chapter_num }} 章。
 

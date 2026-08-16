@@ -8,7 +8,7 @@
 解决方案:
 - TargetedFixer:质检失败时,把问题清单 + 原文反馈给 LLM
 - LLM 只针对问题修改,保留好的部分
-- 多轮迭代:修复后再质检,最多 max_iterations 次
+- 多轮迭代(问题8):修复后通过 quality_check_fn 回调重新质检,通过则停,不通过则带着新问题进入下一轮
 - 修复策略:针对不同问题类型给不同 prompt
 """
 
@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from moliu.data.schemas import ChapterResult
 
@@ -26,6 +26,10 @@ if TYPE_CHECKING:
     from moliu.orchestrator.pipeline import QualityReport
 
 logger = logging.getLogger(__name__)
+
+
+# 质检回调类型:接收内容,返回新的 QualityReport
+QualityCheckFn = Callable[[str], Awaitable["QualityReport"]]
 
 
 @dataclass
@@ -38,6 +42,7 @@ class FixResult:
     issues_history: list[list[str]] = field(default_factory=list)
     fix_log: list[str] = field(default_factory=list)
     tokens_used: int = 0
+    final_qr: "QualityReport | None" = None
 
 
 class TargetedFixer:
@@ -51,6 +56,7 @@ class TargetedFixer:
             chapter_num=5,
             beat="...",
             max_iterations=2,
+            quality_check_fn=async_callback,  # 问题8: 传入后支持多轮迭代
         )
         if result.success:
             content = result.final_content
@@ -71,6 +77,7 @@ class TargetedFixer:
         chapter_num: int,
         beat: str = "",
         max_iterations: int = 2,
+        quality_check_fn: QualityCheckFn | None = None,
     ) -> FixResult:
         """对质检不达标的章节进行定向修复
 
@@ -80,6 +87,8 @@ class TargetedFixer:
             chapter_num: 章节号
             beat: 本章节拍(用于提醒 LLM 主线)
             max_iterations: 最多修复轮次
+            quality_check_fn: 问题8 — 每轮修复后重新质检的回调。
+                传入后启用多轮迭代;不传则单次修复即返回(向后兼容)。
 
         Returns:
             FixResult
@@ -97,9 +106,11 @@ class TargetedFixer:
         if not issues:
             result.success = True
             result.final_content = original_content
+            result.final_qr = quality_report
             return result
 
         current_content = original_content
+        current_qr = quality_report
 
         for iteration in range(max_iterations):
             result.iterations = iteration + 1
@@ -123,18 +134,45 @@ class TargetedFixer:
                 break
 
             current_content = fixed_content
-
-            # 重新评估(通过外部回调)
-            # 这里不直接运行质检,只返回内容,由调用方重新质检
-            # 简化:假设修复一次即可,调用方决定是否再调用
             result.final_content = current_content
-            result.success = True
-            result.fix_log.append(f"第 {iteration + 1} 轮修复完成")
-            return result
 
-        # 修复失败,保留原始内容
-        result.final_content = original_content
-        result.fix_log.append("修复未成功,保留原始内容")
+            # 问题8: 多轮迭代 — 传入 quality_check_fn 时,每轮修复后重新质检
+            if quality_check_fn is not None:
+                try:
+                    new_qr = await quality_check_fn(current_content)
+                    current_qr = new_qr
+                    result.final_qr = new_qr
+                except Exception as e:
+                    result.fix_log.append(f"重新质检失败: {e}")
+                    logger.warning("第 %d 章重新质检失败: %s", chapter_num, e)
+                    # 质检失败不阻断,按"未通过"处理进入下一轮
+                    break
+
+                new_issues = self._collect_issues(new_qr)
+                result.issues_history.append(new_issues)
+                if not new_issues:
+                    result.success = True
+                    result.fix_log.append(f"第 {iteration + 1} 轮修复后质检通过")
+                    return result
+
+                # 仍有问题,进入下一轮(把新问题反馈给 LLM)
+                issues = new_issues
+                result.fix_log.append(
+                    f"第 {iteration + 1} 轮修复后仍有 {len(new_issues)} 个问题"
+                )
+                continue
+            else:
+                # 未传回调:单次修复即返回(向后兼容旧行为)
+                result.success = True
+                result.fix_log.append(f"第 {iteration + 1} 轮修复完成")
+                result.final_qr = current_qr
+                return result
+
+        # 修复失败,保留最后一次的内容(若有)否则原始内容
+        if not result.final_content:
+            result.final_content = original_content
+        result.final_qr = current_qr
+        result.fix_log.append("多轮修复未完全通过,保留最佳内容")
         return result
 
     def _collect_issues(self, qr: "QualityReport") -> list[str]:

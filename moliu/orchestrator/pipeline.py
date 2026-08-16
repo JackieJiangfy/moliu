@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
+import logging
 from pathlib import Path
 
 from moliu.config import Config
 from moliu.data.schemas import (
-    ChapterMeta, ChapterResult, CharacterCard, NarratorCard, WorldSetting,
+    ChapterResult,
+    CharacterCard,
+    NarratorCard,
+    WorldSetting,
 )
 from moliu.engines.checker import AnchoredPreChecker, ConsistencyChecker
 from moliu.engines.gateway import DeepSeekGateway
@@ -18,6 +23,8 @@ from moliu.memory.retriever import Retriever
 from moliu.memory.store import MemoryStore
 from moliu.prompts.manager import PromptManager
 from moliu.rules.rhythm_tracker import RhythmRecord, RhythmTracker, TensionScorer
+
+logger = logging.getLogger(__name__)
 
 
 class QualityReport:
@@ -109,27 +116,50 @@ class ChapterPipeline:
         narrator: NarratorCard | None = None,
         chapter_num: int | None = None,
     ) -> QualityReport:
-        """运行所有质量检查（生成后调用）"""
+        """运行所有质量检查（生成后调用）
+
+        问题9: checker 和 reader 并发执行,减少质检总耗时
+        - 两者无数据依赖,可并发
+        - 失败的一方不影响另一方
+        """
         qr = QualityReport()
 
-        # 一致性检查
+        # 问题9: 并发执行 checker 和 reader(无数据依赖)
+        tasks: list = []
+        task_names: list[str] = []
+
         if self.checker:
-            report = await self.checker.check(
-                result.content, characters, world, narrator,
-                chapter_num=chapter_num,
+            tasks.append(
+                self.checker.check(
+                    result.content, characters, world, narrator,
+                    chapter_num=chapter_num,
+                )
             )
-            qr.consistency = report.to_text()
-            qr.consistency_fatal = report.fatal_count
-            qr.consistency_warn = report.warning_count
+            task_names.append("checker")
 
-        # 读者评估
         if self.reader:
-            fb = await self.reader.evaluate(result.content, chapter_num=chapter_num)
-            qr.reader_feedback = fb.summary()
-            qr.reader_want_next = fb.want_next
-            qr.reader_repetitive = fb.feels_repetitive
+            tasks.append(
+                self.reader.evaluate(result.content, chapter_num=chapter_num)
+            )
+            task_names.append("reader")
 
-        # 张力评分
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for name, res in zip(task_names, results):
+                if isinstance(res, Exception):
+                    # 单个质检失败不影响另一个
+                    logger.warning("%s 质检失败: %s", name, res)
+                    continue
+                if name == "checker":
+                    qr.consistency = res.to_text()
+                    qr.consistency_fatal = res.fatal_count
+                    qr.consistency_warn = res.warning_count
+                elif name == "reader":
+                    qr.reader_feedback = res.summary()
+                    qr.reader_want_next = res.want_next
+                    qr.reader_repetitive = res.feels_repetitive
+
+        # 张力评分(纯本地计算,不需要并发)
         qr.tension_score = TensionScorer.score(result.content)
 
         return qr
@@ -233,17 +263,20 @@ class ChapterPipeline:
                 attempt + 1, "; ".join(reasons),
             )
 
-            # P1-2: 优先尝试定向修复
+            # P1-2: 优先尝试定向修复(问题8: 多轮迭代)
             if use_targeted_fix and self.gateway is not None:
                 try:
                     from moliu.engines.targeted_fixer import TargetedFixer
                     fixer = TargetedFixer(self.config, gateway=self.gateway)
+                    # 把 quality_fn 作为回调传给 fixer,让它内部做多轮迭代
+                    # 每轮修复后用 quality_fn 重新质检,通过则停,不通过则带新问题进下一轮
                     fix_result = await fixer.fix(
                         original_content=result.content,
                         quality_report=qr,
                         chapter_num=chapter_num or result.chapter_num,
                         beat=beat,
-                        max_iterations=1,
+                        max_iterations=2,
+                        quality_check_fn=quality_fn,
                     )
                     if fix_result.success and fix_result.final_content != result.content:
                         from moliu.data.schemas import ChapterResult as _CR
@@ -252,12 +285,17 @@ class ChapterPipeline:
                             content=fix_result.final_content,
                             word_count=len(fix_result.final_content),
                         )
-                        qr = await quality_fn(result)
+                        # 优先用 fixer 内部重新质检的结果(已含多轮迭代结果)
+                        if fix_result.final_qr is not None:
+                            qr = fix_result.final_qr
+                        else:
+                            qr = await quality_fn(result)
                         log.info(
-                            "第 %d 章定向修复后重新质检 — fatal=%d, tension=%d",
-                            result.chapter_num, qr.consistency_fatal, qr.tension_score,
+                            "第 %d 章定向修复 %d 轮后 — fatal=%d, tension=%d",
+                            result.chapter_num, fix_result.iterations,
+                            qr.consistency_fatal, qr.tension_score,
                         )
-                        # 修复后再判一次是否还需要重试
+                        # 判断是否还需要无脑重试
                         new_should_retry = False
                         if "fatal" in retry_on and qr.consistency_fatal > 0:
                             new_should_retry = True
@@ -314,18 +352,41 @@ class ChapterPipeline:
         if qr.consistency:
             (output_dir / "一致性检查.md").write_text(qr.consistency, encoding="utf-8")
 
-        # 分层记忆(P0-1):增量更新 Story Bible
+    async def update_bible_after_save(
+        self,
+        chapter_num: int,
+        result: ChapterResult,
+    ) -> None:
+        """章节保存后增量更新 Story Bible(异步,用 LLM 提取事实)
+
+        优先调用 LLM 提取 world_facts/character_relations/open_promises;
+        失败时由 update_bible_after_chapter 内部兜底(只更新 key_events)。
+        """
+        if not self.layered_memory:
+            return
         try:
+            output_dir = self.config.resolve_output_dir(self.novel_id) / Config.chapter_dir_name(chapter_num)
             meta_path = output_dir / "meta.json"
             if meta_path.exists():
                 from moliu.data.schemas import ChapterMeta
                 chapter_meta = ChapterMeta.from_json(meta_path)
-                self.layered_memory.update_bible_after_chapter(
+                await self.layered_memory.update_bible_after_chapter_async(
                     chapter_num, chapter_meta, result.content,
                 )
         except Exception as e:
             import logging
-            logging.getLogger(__name__).warning("Story Bible 更新失败: %s", e)
+            logging.getLogger(__name__).warning("Story Bible 异步更新失败: %s", e)
+            # 异步失败兜底: 同步更新 key_events
+            try:
+                if meta_path.exists():
+                    from moliu.data.schemas import ChapterMeta
+                    chapter_meta = ChapterMeta.from_json(meta_path)
+                    self.layered_memory.update_bible_after_chapter(
+                        chapter_num, chapter_meta, result.content,
+                    )
+            except Exception as ee:
+                import logging
+                logging.getLogger(__name__).warning("Story Bible 同步兜底失败: %s", ee)
 
     async def maybe_generate_arc_summary(self, chapter_num: int) -> None:
         """章节生成后调用 — 检查并触发阶段摘要生成

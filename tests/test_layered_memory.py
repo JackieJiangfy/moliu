@@ -179,6 +179,129 @@ class TestBibleUpdate:
         # 第 1 章事件应该已被裁剪掉
         assert not any("事件1-a" in e for e in bible.key_events)
 
+    def test_update_bible_heuristic_relations(self, memory):
+        """同步兜底版应从 key_characters 拼装出场关系"""
+        meta = _make_meta(5, key_events=["大战爆发"])
+        meta.key_characters = ["李逸", "苏婉", "黑衣人"]
+        bible = memory.update_bible_after_chapter(5, meta, "正文")
+        assert any("李逸" in r and "苏婉" in r for r in bible.character_relations)
+        assert bible.last_updated_chapter == 5
+
+
+class TestBibleLLMUpdate:
+    """问题1: Story Bible LLM 增量提取测试"""
+
+    @pytest.mark.asyncio
+    async def test_async_update_without_gateway_falls_back(self, memory):
+        """无 gateway 时,异步版应回退到同步(只更新 key_events + 启发式同场关系)"""
+        meta = _make_meta(3, key_events=["黑衣人现身"])
+        bible = await memory.update_bible_after_chapter_async(3, meta, "正文内容")
+        assert any("黑衣人现身" in e for e in bible.key_events)
+        # 无 gateway 不会 LLM 提取,但同步版启发式同场关系会写
+        assert any("主角" in r and "配角" in r for r in bible.character_relations)
+        assert bible.world_facts == []
+        assert bible.open_promises == []
+
+    @pytest.mark.asyncio
+    async def test_async_update_with_llm_extracts_facts(self, memory):
+        """有 gateway 时,异步版应调用 LLM 提取三类事实"""
+        meta = _make_meta(7, key_events=["宝物现世"])
+        meta.key_characters = ["李逸", "苏婉"]
+
+        llm_output = json.dumps({
+            "world_facts": ["昆仑山是修仙圣地", "守墓人是隐世高人"],
+            "character_relations": ["李逸与苏婉结为道侣", "李逸答应苏婉三年内归来"],
+            "open_promises": ["李逸承诺三年后归来", "守墓人隐藏身份未揭"],
+        }, ensure_ascii=False)
+
+        gw = MagicMock()
+        gw.generate = AsyncMock(return_value=(llm_output, 500))
+        memory.gateway = gw
+
+        bible = await memory.update_bible_after_chapter_async(
+            7, meta, "正文内容 " * 50,
+        )
+        # key_events 同步更新
+        assert any("宝物现世" in e for e in bible.key_events)
+        # world_facts LLM 提取
+        assert any("昆仑山" in f for f in bible.world_facts)
+        # character_relations 加 [第7章] 前缀
+        assert any("道侣" in r and "第7章" in r for r in bible.character_relations)
+        # open_promises 直接合并
+        assert any("三年后归来" in p for p in bible.open_promises)
+
+    @pytest.mark.asyncio
+    async def test_async_update_llm_failure_falls_back(self, memory):
+        """LLM 调用失败时,异步版应回退到同步版,不阻断"""
+        meta = _make_meta(8, key_events=["大战爆发"])
+        meta.key_characters = ["李逸", "黑衣人"]
+
+        gw = MagicMock()
+        gw.generate = AsyncMock(side_effect=RuntimeError("API 不可用"))
+        memory.gateway = gw
+
+        bible = await memory.update_bible_after_chapter_async(
+            8, meta, "正文内容 " * 50,
+        )
+        # 仍同步更新 key_events
+        assert any("大战爆发" in e for e in bible.key_events)
+        # 启发式同场关系也被记录(因为 update_bible_after_chapter_async 先调同步版)
+        assert any("李逸" in r and "黑衣人" in r for r in bible.character_relations)
+
+    def test_parse_bible_facts_json_valid(self):
+        """LLM JSON 输出正常解析"""
+        raw = """```json
+{
+  "world_facts": ["南海有龙宫"],
+  "character_relations": ["龙王与主角结盟"],
+  "open_promises": ["龙王承诺借兵"]
+}
+```"""
+        facts = LayeredMemory._parse_bible_facts_json(raw, chapter_num=10)
+        assert facts.world_facts == ["南海有龙宫"]
+        assert facts.character_relations == ["龙王与主角结盟"]
+        assert facts.open_promises == ["龙王承诺借兵"]
+
+    def test_parse_bible_facts_json_invalid_returns_empty(self):
+        """LLM 输出非 JSON 时返回空事实(不抛异常)"""
+        raw = "我无法提取事实,这一章没有新信息。"
+        facts = LayeredMemory._parse_bible_facts_json(raw, chapter_num=11)
+        assert facts.world_facts == []
+        assert facts.character_relations == []
+        assert facts.open_promises == []
+
+    def test_parse_bible_facts_json_missing_fields(self):
+        """LLM JSON 缺字段时用空数组兜底"""
+        raw = '{"world_facts": ["只提取了世界观"]}'
+        facts = LayeredMemory._parse_bible_facts_json(raw, chapter_num=12)
+        assert facts.world_facts == ["只提取了世界观"]
+        assert facts.character_relations == []
+        assert facts.open_promises == []
+
+    @pytest.mark.asyncio
+    async def test_async_update_dedupes_facts(self, memory):
+        """同一事实重复提取应去重"""
+        meta = _make_meta(9, key_events=["第一章事件"])
+        meta.key_characters = ["A", "B"]
+
+        llm_output = json.dumps({
+            "world_facts": ["昆仑山是修仙圣地"],
+            "character_relations": ["A与B结盟"],
+            "open_promises": [],
+        }, ensure_ascii=False)
+        gw = MagicMock()
+        gw.generate = AsyncMock(return_value=(llm_output, 100))
+        memory.gateway = gw
+
+        # 第一次更新
+        await memory.update_bible_after_chapter_async(9, meta, "正文 " * 50)
+        # 第二次同样事实
+        await memory.update_bible_after_chapter_async(10, meta, "正文 " * 50)
+        bible = memory.load_bible()
+        # world_facts 不应重复
+        count = sum(1 for f in bible.world_facts if "昆仑山" in f)
+        assert count == 1
+
 
 class TestArcSummary:
     def test_heuristic_summary_without_llm(self, memory, tmp_config):
@@ -260,6 +383,113 @@ class TestArcSummary:
         arc = await memory.generate_arc_summary(1, 1, 10)
         assert arc.summary  # 启发式仍生成了内容
         assert "第1-10章" in arc.summary
+
+    @pytest.mark.asyncio
+    async def test_llm_arc_summary_json_format(self, memory, tmp_config):
+        """问题7: LLM 输出 JSON 格式时正确解析"""
+        for i in range(1, 11):
+            meta = _make_meta(i, summary=f"第{i}章摘要", key_events=[f"事件{i}"])
+            _save_chapter_meta(tmp_config, i, meta)
+
+        import json
+        llm_output = json.dumps({
+            "summary": "主角在第1-10章中完成了从普通人到觉醒者的转变。",
+            "key_events": ["主角觉醒能力", "与反派首次交锋", "加入守护者组织"],
+            "character_changes": ["主角 — 从普通人变为觉醒者"],
+            "open_threads": ["反派的真实目的尚未揭晓", "主角的师父下落不明"],
+        }, ensure_ascii=False)
+
+        mock_gateway = MagicMock()
+        mock_gateway.generate = AsyncMock(return_value=(llm_output, 500))
+        memory.gateway = mock_gateway
+
+        arc = await memory.generate_arc_summary(1, 1, 10)
+        assert arc.arc_id == 1
+        assert "主角" in arc.summary
+        assert len(arc.key_events) == 3
+        assert any("觉醒" in e for e in arc.key_events)
+        assert len(arc.character_changes) == 1
+        assert len(arc.open_threads) == 2
+
+    def test_parse_arc_json_plain(self):
+        """问题7: 纯 JSON 字符串正确解析"""
+        from moliu.memory.layered import LayeredMemory
+        import json
+
+        text = json.dumps({
+            "summary": "测试总结",
+            "key_events": ["事件A", "事件B"],
+            "character_changes": ["角色X变化"],
+            "open_threads": ["悬念1"],
+        }, ensure_ascii=False)
+
+        s, events, changes, threads = LayeredMemory._parse_arc_llm_output(text)
+        assert s == "测试总结"
+        assert events == ["事件A", "事件B"]
+        assert changes == ["角色X变化"]
+        assert threads == ["悬念1"]
+
+    def test_parse_arc_json_with_markdown_wrapper(self):
+        """问题7: JSON 被 markdown 代码块包裹时也能解析"""
+        from moliu.memory.layered import LayeredMemory
+        import json
+
+        inner = json.dumps({
+            "summary": "带包裹的总结",
+            "key_events": ["事件1"],
+            "character_changes": [],
+            "open_threads": [],
+        }, ensure_ascii=False)
+        text = f"```json\n{inner}\n```"
+
+        s, events, changes, threads = LayeredMemory._parse_arc_llm_output(text)
+        assert s == "带包裹的总结"
+        assert events == ["事件1"]
+
+    def test_parse_arc_fallback_to_legacy_format(self):
+        """问题7: JSON 解析失败时回退到【】标记格式"""
+        from moliu.memory.layered import LayeredMemory
+
+        # 旧的【】格式
+        text = """【阶段总结】
+旧格式总结内容。
+
+【关键事件】
+1. 旧事件A发生了
+2. 旧事件B结束了
+
+【未决线索】
+1. 旧悬念仍未解"""
+
+        s, events, changes, threads = LayeredMemory._parse_arc_llm_output(text)
+        assert "旧格式总结" in s
+        assert any("旧事件A" in e for e in events)
+        assert any("旧悬念" in t for t in threads)
+
+    def test_parse_arc_json_partial_fields(self):
+        """问题7: JSON 缺少部分字段时不报错"""
+        from moliu.memory.layered import LayeredMemory
+        import json
+
+        text = json.dumps({
+            "summary": "只有总结",
+            # 缺少 key_events/character_changes/open_threads
+        }, ensure_ascii=False)
+
+        s, events, changes, threads = LayeredMemory._parse_arc_llm_output(text)
+        assert s == "只有总结"
+        assert events == []
+        assert changes == []
+        assert threads == []
+
+    def test_parse_arc_json_invalid_returns_empty(self):
+        """问题7: 既不是 JSON 也不是【】格式时返回空"""
+        from moliu.memory.layered import LayeredMemory
+
+        text = "这是一段无法解析的随机文本"
+        s, events, changes, threads = LayeredMemory._parse_arc_llm_output(text)
+        assert s == ""
+        assert events == []
 
 
 class TestRebuildBible:

@@ -223,6 +223,184 @@ class TestFix:
         assert not result.final_content.startswith("```")
 
 
+# === 问题8: 多轮迭代 ===
+
+class TestMultiIteration:
+    """问题8: 定向修复支持多轮迭代(传入 quality_check_fn)"""
+
+    @pytest.mark.asyncio
+    async def test_passes_on_first_iteration(self, fixer, bad_qr, good_qr):
+        """第 1 轮修复后质检通过,应停止迭代"""
+        call_count = {"qc": 0}
+
+        async def fake_qc(content: str):
+            call_count["qc"] += 1
+            return good_qr
+
+        mock_gateway = MagicMock()
+        mock_gateway.generate = AsyncMock(return_value=("修复后的内容" * 30, 200))
+        fixer.gateway = mock_gateway
+
+        result = await fixer.fix(
+            original_content="原始内容" * 30,
+            quality_report=bad_qr,
+            chapter_num=5,
+            max_iterations=3,
+            quality_check_fn=fake_qc,
+        )
+        assert result.success
+        assert result.iterations == 1
+        assert mock_gateway.generate.call_count == 1
+        assert call_count["qc"] == 1
+        assert result.final_qr is good_qr
+
+    @pytest.mark.asyncio
+    async def test_iterates_until_pass(self, fixer, bad_qr):
+        """第 1 轮未通过、第 2 轮通过,应迭代 2 轮"""
+        call_count = {"llm": 0, "qc": 0}
+        good_qr = QualityReport()
+        good_qr.consistency_fatal = 0
+        good_qr.tension_score = 7
+        good_qr.reader_want_next = True
+        good_qr.reader_repetitive = False
+        good_qr.rhythm_alerts = []
+
+        async def fake_qc(content: str):
+            call_count["qc"] += 1
+            # 第 1 次质检:仍有问题;第 2 次:通过
+            if call_count["qc"] == 1:
+                return bad_qr
+            return good_qr
+
+        mock_gateway = MagicMock()
+        mock_gateway.generate = AsyncMock(return_value=("修复内容" * 30, 200))
+        fixer.gateway = mock_gateway
+
+        result = await fixer.fix(
+            original_content="原始" * 30,
+            quality_report=bad_qr,
+            chapter_num=5,
+            max_iterations=3,
+            quality_check_fn=fake_qc,
+        )
+        assert result.success
+        assert result.iterations == 2
+        assert call_count["qc"] == 2
+        # issues_history 应记录:初始 + 第1轮后 + 第2轮后 = 3 条
+        assert len(result.issues_history) == 3
+
+    @pytest.mark.asyncio
+    async def test_max_iterations_exhausted(self, fixer, bad_qr):
+        """达到 max_iterations 仍未通过,应返回 success=False 并保留最后内容"""
+        call_count = {"llm": 0, "qc": 0}
+
+        async def fake_qc(content: str):
+            call_count["qc"] += 1
+            return bad_qr  # 永远不通过
+
+        mock_gateway = MagicMock()
+        mock_gateway.generate = AsyncMock(return_value=("修复后的内容" * 30, 200))
+        fixer.gateway = mock_gateway
+
+        result = await fixer.fix(
+            original_content="原始" * 30,
+            quality_report=bad_qr,
+            chapter_num=5,
+            max_iterations=2,
+            quality_check_fn=fake_qc,
+        )
+        assert not result.success
+        assert result.iterations == 2
+        assert call_count["qc"] == 2
+        # 保留最后一次修复的内容(不是原始内容)
+        assert "修复后的内容" in result.final_content
+        assert result.final_qr is bad_qr
+
+    @pytest.mark.asyncio
+    async def test_no_quality_fn_single_iteration(self, fixer, bad_qr):
+        """不传 quality_check_fn 时,单次修复即返回(向后兼容)"""
+        mock_gateway = MagicMock()
+        mock_gateway.generate = AsyncMock(return_value=("修复后的内容" * 30, 200))
+        fixer.gateway = mock_gateway
+
+        result = await fixer.fix(
+            original_content="原始" * 30,
+            quality_report=bad_qr,
+            chapter_num=5,
+            max_iterations=3,
+            # 不传 quality_check_fn
+        )
+        assert result.success
+        assert result.iterations == 1
+
+    @pytest.mark.asyncio
+    async def test_quality_fn_exception_breaks_loop(self, fixer, bad_qr):
+        """质检回调抛异常时,应中止迭代并保留已修复内容"""
+        async def fake_qc(content: str):
+            raise RuntimeError("质检服务挂了")
+
+        mock_gateway = MagicMock()
+        mock_gateway.generate = AsyncMock(return_value=("修复后的内容" * 30, 200))
+        fixer.gateway = mock_gateway
+
+        result = await fixer.fix(
+            original_content="原始" * 30,
+            quality_report=bad_qr,
+            chapter_num=5,
+            max_iterations=3,
+            quality_check_fn=fake_qc,
+        )
+        assert not result.success
+        assert result.iterations == 1
+        # 保留已修复内容
+        assert "修复后的内容" in result.final_content
+        # 日志应记录质检失败
+        assert any("重新质检失败" in log for log in result.fix_log)
+
+    @pytest.mark.asyncio
+    async def test_issues_history_grows_with_iterations(self, fixer, bad_qr):
+        """issues_history 应随迭代轮次增长"""
+        good_qr = QualityReport()
+        good_qr.consistency_fatal = 0
+        good_qr.tension_score = 8
+        good_qr.reader_want_next = True
+        good_qr.reader_repetitive = False
+        good_qr.rhythm_alerts = []
+
+        qc_calls = {"n": 0}
+
+        async def fake_qc(content: str):
+            qc_calls["n"] += 1
+            # 第 1 次不通过(改用 warn 级别),第 2 次通过
+            if qc_calls["n"] == 1:
+                mid_qr = QualityReport()
+                mid_qr.consistency_fatal = 0
+                mid_qr.consistency_warn = 2
+                mid_qr.tension_score = 6
+                mid_qr.reader_want_next = True
+                mid_qr.reader_repetitive = False
+                mid_qr.rhythm_alerts = []
+                return mid_qr
+            return good_qr
+
+        mock_gateway = MagicMock()
+        mock_gateway.generate = AsyncMock(return_value=("修复后的内容" * 30, 100))
+        fixer.gateway = mock_gateway
+
+        result = await fixer.fix(
+            original_content="原始" * 30,
+            quality_report=bad_qr,
+            chapter_num=5,
+            max_iterations=3,
+            quality_check_fn=fake_qc,
+        )
+        # 初始问题 + 第 1 轮后问题(空) = 2 条
+        assert len(result.issues_history) == 2
+        # 第 1 轮后的问题数应 < 初始(因 warn 级别不会被 _collect_issues 收集)
+        assert len(result.issues_history[0]) > 0
+        assert len(result.issues_history[1]) == 0
+
+
 # === Pipeline 集成 ===
 
 class TestPipelineIntegration:

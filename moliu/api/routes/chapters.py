@@ -519,6 +519,8 @@ async def _run_generation(
     pipeline.save_meta(chapter_num, result, qr, clean_summary, emotion, characters)
     pipeline.save_to_memory(chapter_num, result, clean_summary, emotion, characters)
     pipeline.save_rhythm_record(chapter_num, result, qr, chapter_type, emotion)
+    # 分层记忆(P0-1):用 LLM 增量更新 Story Bible(角色关系/世界观事实/未解悬念)
+    await pipeline.update_bible_after_save(chapter_num, result)
     # 分层记忆(P0-1):每 10 章触发一次阶段摘要生成
     await pipeline.maybe_generate_arc_summary(chapter_num)
 

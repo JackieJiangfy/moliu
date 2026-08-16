@@ -15,7 +15,7 @@ from fastapi.responses import RedirectResponse
 
 from moliu.config import Config
 
-from .routes import status, volumes, chapters, characters, world, foreshadows, relationships, novels, openai_compat
+from .routes import status, volumes, chapters, characters, world, foreshadows, relationships, novels, plans, openai_compat
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -53,6 +53,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.include_router(world.router, prefix="/api/v1", tags=["世界观"])
     app.include_router(foreshadows.router, prefix="/api/v1", tags=["伏笔"])
     app.include_router(relationships.router, prefix="/api/v1", tags=["关系图谱"])
+    app.include_router(plans.router, prefix="/api/v1", tags=["创作规划"])
 
     # OpenAI 兼容接口（无前缀 — 直接挂载在 /v1 下）
     app.include_router(openai_compat.router, tags=["OpenAI 兼容"])

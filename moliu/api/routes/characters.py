@@ -22,6 +22,8 @@ class CharacterResponse(BaseModel):
     current_location: str
     current_goal: str
     current_emotion: str
+    status: str = "active"                      # 问题4: 角色状态(用于排序)
+    last_chapter_appeared: int = 0              # 问题4: 最近出场章节(用于排序)
 
 
 class CharacterUpdate(BaseModel):
@@ -36,9 +38,25 @@ async def list_characters(
     request: Request,
     novel_id: int = Query(1, description="小说ID"),
 ):
-    """获取所有角色"""
+    """获取所有角色
+
+    问题4: 排序依据明确化 — 按"状态优先级 + 最近出场章节倒序 + 文件名"组合排序
+    1. 状态优先级:active(0) > injured(1) > missing(2) > left(3) > dead(4) > 其他(5)
+       — 已死亡/离开的角色排最后,不干扰阅读
+    2. 最近出场章节号倒序:出场越近越靠前(更"活跃"的角色优先)
+    3. 文件名兜底:同状态同出场章的角色按文件名稳定排序
+    """
     cfg = request.app.state.config
     char_dir = cfg.resolve_data_dir(novel_id) / "characters"
+
+    # 状态优先级映射
+    status_priority = {
+        "active": 0,
+        "injured": 1,
+        "missing": 2,
+        "left": 3,
+        "dead": 4,
+    }
 
     characters = []
     for f in sorted(char_dir.glob("*.yaml")):
@@ -54,7 +72,18 @@ async def list_characters(
             current_location=card.state.location if card.state else "",
             current_goal=card.state.current_goal if card.state else "",
             current_emotion=card.state.current_emotion if card.state else "",
+            status=card.state.status if card.state else "active",
+            last_chapter_appeared=card.state.last_chapter_appeared if card.state else 0,
         ))
+
+    # 组合排序:状态优先级 → 出场章节倒序 → 名字
+    characters.sort(
+        key=lambda c: (
+            status_priority.get(c.status, 5),
+            -c.last_chapter_appeared,
+            c.name,
+        )
+    )
 
     return characters
 
@@ -82,6 +111,8 @@ async def get_character(
         current_location=card.state.location if card.state else "",
         current_goal=card.state.current_goal if card.state else "",
         current_emotion=card.state.current_emotion if card.state else "",
+        status=card.state.status if card.state else "active",
+        last_chapter_appeared=card.state.last_chapter_appeared if card.state else 0,
     )
 
 
@@ -123,4 +154,6 @@ async def update_character(
         current_location=card.state.location if card.state else "",
         current_goal=card.state.current_goal if card.state else "",
         current_emotion=card.state.current_emotion if card.state else "",
+        status=card.state.status if card.state else "active",
+        last_chapter_appeared=card.state.last_chapter_appeared if card.state else 0,
     )

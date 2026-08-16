@@ -172,40 +172,68 @@ class StoryBible:
         return text
 
 
+@dataclass
+class _BibleFacts:
+    """LLM 提取的章节级 Story Bible 事实(中间产物,不入磁盘)"""
+    world_facts: list[str] = field(default_factory=list)
+    character_relations: list[str] = field(default_factory=list)
+    open_promises: list[str] = field(default_factory=list)
+
+
+# Story Bible 事实提取的 LLM Prompt(严格 JSON 输出)
+BIBLE_FACTS_SYSTEM_PROMPT = """你是小说世界观与角色关系分析助手。
+
+任务: 阅读章节正文,提取本章新确立的事实,供全书累积记忆(Story Bible)使用。
+
+输出格式必须是合法 JSON 对象,字段如下:
+
+{
+  "world_facts": [
+    "本章新揭示或确认的世界观事实(如:地理名称、势力组织、规则法则、历史背景等)"
+  ],
+  "character_relations": [
+    "本章出现或发生变化的角色关系(格式建议: 'A 与 B 形成师徒关系' / 'A 背叛了 B' / 'A 向 B 承诺...')"
+  ],
+  "open_promises": [
+    "本章埋下的未解悬念、人物承诺、剧情线(如: 'A 答应三天后归还宝物' / 'B 隐瞒了真实身份')"
+  ]
+}
+
+规则:
+1. 只提取本章正文明确体现的事实,不要编造或推测
+2. 每条不超过 40 字
+3. 同一类事实只列本章新出现的,不要重复已有事实
+4. 如果某类事实本章没有,返回空数组 []
+5. 只输出 JSON,不要任何解释、markdown 代码块或额外说明
+"""
+
+
 # === LLM 生成阶段摘要的 Prompt ===
 
 ARC_SUMMARY_SYSTEM = """你是小说编辑助手,擅长把多章节浓缩成结构化阶段总结。
 你将从若干章节的元数据中提炼出阶段摘要,供后续章节生成时回顾前文。
 
-输出严格按以下格式(每节用【】标记):
+输出严格按 JSON 格式,不要输出其他内容:
 
-【阶段总结】
-(2-3 句话总结这个阶段发生了什么、推进了什么剧情线)
-
-【关键事件】
-1. ...
-2. ...
-(3-6 条最重要的事件,按时间序)
-
-【角色变化】
-1. 角色名 — 从X变为Y (因为...)
-(只记录有显著变化的,无关紧要不写)
-
-【未决线索】
-1. ...
-(本阶段结束时仍未解决的问题、承诺、悬念)
+{
+  "summary": "2-3 句话总结这个阶段发生了什么、推进了什么剧情线",
+  "key_events": ["3-6 条最重要的事件,按时间序"],
+  "character_changes": ["角色名 — 从X变为Y(因为...),只记录显著变化"],
+  "open_threads": ["本阶段结束时仍未解决的问题、承诺、悬念"]
+}
 
 要点:
 - 用第三人称,客观陈述
 - 避免细节描写,只记关键信息
 - 每条不超过 40 字
+- 只输出 JSON,不要 markdown 代码块包裹
 """
 
 ARC_SUMMARY_USER = """以下是第 {start} 到第 {end} 章的元数据:
 
 {chapters_meta}
 
-请按格式生成阶段摘要。"""
+请按 JSON 格式生成阶段摘要。"""
 
 
 class LayeredMemory:
@@ -351,13 +379,45 @@ class LayeredMemory:
 
     @staticmethod
     def _parse_arc_llm_output(text: str) -> tuple[str, list[str], list[str], list[str]]:
-        """解析 LLM 输出的阶段摘要(容错解析)"""
+        """解析 LLM 输出的阶段摘要(容错解析)
+
+        问题7: 优先用 JSON 解析,失败时回退到旧的【】标记解析
+        """
         summary = ""
         key_events: list[str] = []
         character_changes: list[str] = []
         open_threads: list[str] = []
 
-        # 用【】分段
+        # 问题7: 优先尝试 JSON 解析
+        json_parsed = False
+        try:
+            import json as _json
+
+            text_stripped = text.strip()
+            # 去除可能的 markdown 代码块包裹
+            if text_stripped.startswith("```"):
+                lines = text_stripped.split("\n")
+                # 去掉首尾 ``` 行
+                if lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                text_stripped = "\n".join(lines).strip()
+
+            data = _json.loads(text_stripped)
+            if isinstance(data, dict):
+                summary = str(data.get("summary", "")).strip()
+                key_events = [str(e).strip() for e in data.get("key_events", []) if str(e).strip()]
+                character_changes = [str(c).strip() for c in data.get("character_changes", []) if str(c).strip()]
+                open_threads = [str(t).strip() for t in data.get("open_threads", []) if str(t).strip()]
+                json_parsed = True
+        except (ValueError, TypeError) as e:
+            logger.debug("JSON 解析阶段摘要失败,回退到【】解析: %s", e)
+
+        if json_parsed:
+            return summary, key_events, character_changes, open_threads
+
+        # 回退:旧的【】标记解析(向后兼容)
         sections = re.split(r"【[^】]+】", text)
         headers = re.findall(r"【([^】]+)】", text)
 
@@ -416,6 +476,46 @@ class LayeredMemory:
         ][:5]
 
         return summary, unique_events[:6], char_changes, []
+
+    @staticmethod
+    def _parse_bible_facts_json(raw: str, chapter_num: int) -> "_BibleFacts":
+        """从 LLM 输出中解析 Story Bible 事实 JSON(容错解析)"""
+        # 去掉 markdown ```json ... ``` 包裹
+        cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned.strip())
+
+        # 找到第一个 { 到最后一个 }
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            logger.warning("第%d章 Story Bible 提取未找到 JSON,raw=%s", chapter_num, raw[:200])
+            return _BibleFacts()
+
+        try:
+            data = json.loads(cleaned[start:end + 1])
+        except json.JSONDecodeError as e:
+            logger.warning("第%d章 Story Bible JSON 解析失败: %s, raw=%s",
+                          chapter_num, e, cleaned[:200])
+            return _BibleFacts()
+
+        if not isinstance(data, dict):
+            return _BibleFacts()
+
+        def _str_list(v: Any) -> list[str]:
+            if not isinstance(v, list):
+                return []
+            return [str(x).strip() for x in v if str(x).strip()]
+
+        facts = _BibleFacts(
+            world_facts=_str_list(data.get("world_facts")),
+            character_relations=_str_list(data.get("character_relations")),
+            open_promises=_str_list(data.get("open_promises")),
+        )
+        logger.info(
+            "第%d章提取 Story Bible 事实: 世界观=%d, 关系=%d, 悬念=%d",
+            chapter_num, len(facts.world_facts), len(facts.character_relations), len(facts.open_promises),
+        )
+        return facts
 
     def _save_arc_summary(self, arc: ArcSummary) -> None:
         """追加保存阶段摘要(同 arc_id 则替换)"""
@@ -495,15 +595,11 @@ class LayeredMemory:
         chapter_meta: ChapterMeta,
         content: str = "",
     ) -> StoryBible:
-        """章节生成后增量更新 Story Bible
+        """章节生成后增量更新 Story Bible(同步,仅 key_events)
 
-        策略:
-        - key_events: 从 meta.key_events 追加(去重)
-        - world_facts: 不自动提取(需要人工或后续 LLM 提取)
-        - open_promises: 不自动提取(由伏笔表管理)
-        - character_relations: 不自动提取(由关系图谱管理)
-
-        保持简单 — 只追加 key_events,其他由专门模块负责。
+        异步版 `update_bible_after_chapter_async` 会用 LLM 提取
+        world_facts / character_relations / open_promises。
+        本方法仅做启发式兜底,保持向后兼容。
         """
         bible = self.load_bible()
 
@@ -519,10 +615,119 @@ class LayeredMemory:
         if len(bible.key_events) > BIBLE_MAX_EVENTS * 2:
             bible.key_events = bible.key_events[-BIBLE_MAX_EVENTS:]
 
+        # 启发式提取 character_relations — 从 meta.key_characters 拼装出场关系
+        if chapter_meta.key_characters and len(chapter_meta.key_characters) >= 2:
+            chars = chapter_meta.key_characters[:6]  # 最多 6 个,避免爆炸
+            rel_text = f"[第{chapter_num}章] {'、'.join(chars)} 同场出现"
+            if rel_text not in bible.character_relations:
+                bible.character_relations.append(rel_text)
+            if len(bible.character_relations) > 60:
+                bible.character_relations = bible.character_relations[-30:]
+
         bible.last_updated_chapter = chapter_num
         bible.last_updated_at = datetime.now(timezone.utc).isoformat()
         self.save_bible(bible)
         return bible
+
+    async def update_bible_after_chapter_async(
+        self,
+        chapter_num: int,
+        chapter_meta: ChapterMeta,
+        content: str = "",
+    ) -> StoryBible:
+        """章节生成后用 LLM 增量更新 Story Bible
+
+        优先用 LLM 从章节正文提取三类信息:
+        - world_facts: 地理/势力/规则等已确立事实
+        - character_relations: 角色关系演化(谁帮过谁、谁背叛谁)
+        - open_promises: 人物承诺/剧情线/未解悬念
+
+        失败时回退到同步启发式版本(update_bible_after_chapter)。
+        始终保留 key_events 同步更新逻辑。
+        """
+        # 先做同步兜底更新 key_events
+        bible = self.update_bible_after_chapter(chapter_num, chapter_meta, content)
+
+        # 无 gateway 或无正文 → 跳过 LLM 提取
+        if not self.gateway or not content or len(content) < 100:
+            return bible
+
+        try:
+            extracted = await self._extract_bible_facts_with_llm(
+                chapter_num, content, chapter_meta,
+            )
+        except Exception as e:
+            logger.warning("LLM 提取 Story Bible 事实失败 ch%d: %s", chapter_num, e)
+            return bible
+
+        # 增量合并(去重保序)
+        def _merge(target: list[str], new_items: list[str], cap: int) -> None:
+            seen = set(target)
+            for item in new_items:
+                item = item.strip()
+                if item and item not in seen:
+                    target.append(item)
+                    seen.add(item)
+            if len(target) > cap * 2:
+                del target[: len(target) - cap]
+
+        if extracted.world_facts:
+            _merge(bible.world_facts, extracted.world_facts, BIBLE_MAX_FACTS)
+        if extracted.character_relations:
+            _merge(
+                bible.character_relations,
+                [f"[第{chapter_num}章] {r}" for r in extracted.character_relations],
+                40,
+            )
+        if extracted.open_promises:
+            _merge(bible.open_promises, extracted.open_promises, BIBLE_MAX_PROMISES)
+
+        bible.last_updated_chapter = chapter_num
+        bible.last_updated_at = datetime.now(timezone.utc).isoformat()
+        self.save_bible(bible)
+        return bible
+
+    async def _extract_bible_facts_with_llm(
+        self,
+        chapter_num: int,
+        content: str,
+        chapter_meta: ChapterMeta,
+    ) -> "_BibleFacts":
+        """用 LLM 从章节正文提取 Story Bible 事实(严格 JSON 输出)"""
+        # 截断正文,避免超长 — 取首尾各 2000 字
+        if len(content) > 5000:
+            content_for_llm = content[:2000] + "\n...(中略)...\n" + content[-2000:]
+        else:
+            content_for_llm = content
+
+        char_hint = ""
+        if chapter_meta.key_characters:
+            char_hint = "出场角色: " + "、".join(chapter_meta.key_characters[:8])
+
+        event_hint = ""
+        if chapter_meta.key_events:
+            event_hint = "本章关键事件: " + "; ".join(chapter_meta.key_events[:3])
+
+        user_prompt = f"""章节号: 第{chapter_num}章
+{char_hint}
+{event_hint}
+
+章节正文:
+---
+{content_for_llm}
+---
+
+请按 JSON 格式提取本章已确立的事实。只输出 JSON,不要任何解释。
+"""
+
+        raw, _ = await self.gateway.generate(
+            system_prompt=BIBLE_FACTS_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            temperature=0.2,
+            max_tokens=1024,
+            chapter_num=chapter_num,
+        )
+        return self._parse_bible_facts_json(raw, chapter_num)
 
     def rebuild_bible_from_history(self) -> StoryBible:
         """从所有已生成章节的 meta.json 重建 Story Bible
