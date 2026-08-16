@@ -35,10 +35,13 @@ class StructuredContext:
     recent_chapters_full: str = ""
     last_emotion: str = "轻松"
     last_300_words: str = ""
+    # 分层记忆(P0-1):中期阶段摘要 + 长期 Story Bible
+    layered_memory: str = ""
 
     def to_prompt_context(self) -> str:
         """渲染为可注入的上下文块"""
         sections = [
+            ("layered_memory", ""),  # 已自带标题,不加额外头
             ("arc_direction", "【当前故事方向】"),
             ("character_snapshots", "【出场角色当前状态】"),
             ("graph_insights", "【图谱智能提示】"),
@@ -51,17 +54,22 @@ class StructuredContext:
         for attr, header in sections:
             value = getattr(self, attr, "")
             if value:
-                parts.append(f"{header}\n{value}")
+                if header:
+                    parts.append(f"{header}\n{value}")
+                else:
+                    parts.append(value)
         return "\n\n".join(parts)
 
 
 class StructuredAssembler:
     """作家的上下文组装：精确查询，不语义检索"""
 
-    def __init__(self, config: Config, novel_id: int = 1):
+    def __init__(self, config: Config, novel_id: int = 1, layered_memory=None):
         self.config = config
         self.novel_id = novel_id
         self._cache: dict[str, str] = {}  # path → content
+        # 分层记忆(P0-1):可选注入,缺失时优雅降级
+        self._layered_memory = layered_memory
 
     def _read_cached(self, path: Path) -> str | None:
         key = str(path)
@@ -109,6 +117,14 @@ class StructuredAssembler:
             ctx.recent_chapters_full = self._load_recent_full(chapter_num)
 
         ctx.last_300_words = self._load_last_300_words(chapter_num)
+
+        # 分层记忆(P0-1):中期阶段摘要 + 长期 Story Bible
+        # 注入位置在前文原文之前 — 让 AI 先看全局记忆再看具体前文
+        if self._layered_memory is not None:
+            try:
+                ctx.layered_memory = self._layered_memory.assemble_for_chapter(chapter_num)
+            except Exception as e:
+                logger.warning("分层记忆装配失败,跳过: %s", e)
 
         # 图谱反向注入（本地内建）— 失败时优雅降级，不阻断装配
         try:

@@ -173,6 +173,23 @@ def write(
             reader=reader, tracker=tracker,
         )
 
+        # P0-2: 从章级大纲读取 beat/emotion/chapter_type(若未显式指定)
+        from moliu.engines.outline_engine import ChapterOutlineEngine
+        outline_engine = ChapterOutlineEngine(config, novel_id=novel_id, gateway=gateway)
+        outline_touched = False
+        if not beat or chapter_type == "auto":
+            plan = outline_engine.get_chapter_plan(chapter_num)
+            if plan is not None:
+                if not beat:
+                    beat = plan.beat
+                    typer.echo(f"\r[OK] 从大纲读取 beat: {beat[:40]}...")
+                if chapter_type == "auto":
+                    chapter_type = plan.chapter_type
+                if not emotion or emotion == "轻松":
+                    emotion = plan.emotion or "轻松"
+                outline_engine.mark_chapter_status(chapter_num, "generating")
+                outline_touched = True
+
         # 1. 角色锚点预检
         pre_ok, pre_text = await pipeline.run_pre_check(beat, characters, chapter_num=chapter_num)
         if not pre_ok:
@@ -180,8 +197,10 @@ def write(
         else:
             typer.echo(f"\r[OK] 锚点预检通过")
 
-        # 2. 结构化上下文 (作家思维：大纲+人物表+伏笔+最近稿子)
-        assembler = StructuredAssembler(config)
+        # 2. 结构化上下文 (作家思维：大纲+人物表+伏笔+最近稿子+分层记忆)
+        from moliu.memory.layered import LayeredMemory
+        layered = LayeredMemory(config, novel_id=novel_id, gateway=gateway)
+        assembler = StructuredAssembler(config, novel_id=novel_id, layered_memory=layered)
         ctx = await assembler.assemble(
             chapter_num, beat, characters, world,
             narrator=narrator, narrator_guide="",
@@ -200,6 +219,7 @@ def write(
             temperature=temperature,
             segmented=segmented,
             chapter_type=chapter_type,
+            memory_context=ctx.layered_memory,
         )
 
         # 4. 去AI味检测 + 改写 (Phase 3)
@@ -252,6 +272,31 @@ def write(
         pipeline.save_meta(chapter_num, result, qr, clean_summary, emotion, characters)
         pipeline.save_to_memory(chapter_num, result, clean_summary, emotion, characters)
         pipeline.save_rhythm_record(chapter_num, result, qr, chapter_type, emotion)
+        # 分层记忆(P0-1):每 10 章触发一次阶段摘要
+        await pipeline.maybe_generate_arc_summary(chapter_num)
+
+        # P1-1:自动提取并应用伏笔
+        try:
+            from moliu.engines.foreshadow_extractor import extract_and_apply_foreshadows
+            plan = outline_engine.get_chapter_plan(chapter_num)
+            fs_result, fs_stats = await extract_and_apply_foreshadows(
+                config, novel_id, chapter_num, result.content,
+                plan=plan, gateway=gateway,
+            )
+            if fs_stats["planted"] or fs_stats["paid"]:
+                typer.echo(
+                    f"\r[OK] 伏笔: 埋 {fs_stats['planted']} / 推进 {fs_stats['advanced']} / 回收 {fs_stats['paid']}"
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("伏笔提取失败: %s", e)
+
+        # P0-2:标记大纲状态为 completed
+        if outline_touched:
+            try:
+                outline_engine.mark_chapter_status(chapter_num, "completed")
+            except Exception:
+                pass
 
         filepath = config.resolve_output_dir() / Config.chapter_dir_name(chapter_num) / "正文.md"
         return result, filepath
@@ -447,7 +492,9 @@ def retry_segment(
     from moliu.engines.usage import UsageTracker
 
     memory = MemoryStore(str(config.resolve_data_dir() / "memory_db"))
-    retriever = StructuredAssembler(config)
+    from moliu.memory.layered import LayeredMemory
+    layered = LayeredMemory(config, novel_id=novel_id, gateway=gateway)
+    retriever = StructuredAssembler(config, novel_id=novel_id, layered_memory=layered)
     checker = ConsistencyChecker(gateway)
     reader = ReaderEvaluator(gateway)
     tracker = RhythmTracker(config.resolve_data_dir())
@@ -534,6 +581,8 @@ def retry_segment(
         pipeline.save_meta(chapter_num, result, qr, clean_summary, "轻松", characters)
         pipeline.save_to_memory(chapter_num, result, clean_summary, "轻松", characters)
         pipeline.save_rhythm_record(chapter_num, result, qr, original_chapter_type, "轻松")
+        # 分层记忆(P0-1):每 10 章触发一次阶段摘要
+        await pipeline.maybe_generate_arc_summary(chapter_num)
 
         # 清理临时分段文件
         pipeline.generator._clear_segments(chapter_num)

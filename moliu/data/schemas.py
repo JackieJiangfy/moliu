@@ -294,6 +294,17 @@ class WorldSetting(BaseModel):
             raise ValueError(f"世界观文件格式错误: {path} (期望 YAML dict)")
         return cls(**data)
 
+    def to_yaml(self, path: Path) -> None:
+        """保存世界观到 YAML 文件"""
+        with open(path, "w", encoding="utf-8") as f:
+            yaml.dump(
+                self.model_dump(),
+                f,
+                allow_unicode=True,
+                default_flow_style=False,
+                sort_keys=False,
+            )
+
 
 # === 叙述者 ===
 

@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>墨流 · 小说创作工作台</title>
-<script src="https://cdn.tailwindcss.com"></script>
+<script src="/static/tailwind.js"></script>
+<script src="/static/echarts.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;700;900&family=Ma+Shan+Zheng&family=ZCOOL+XiaoWei&display=swap" rel="stylesheet">
 <script>
 tailwind.config = {
@@ -87,18 +88,230 @@ tailwind.config = {
     .sidebar-overlay.show { display: block; }
   }
   .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* === 古卷藏书阁 卡片样式 === */
+  .novel-scroll {
+    position: relative;
+    background-color: var(--paper);
+    background-image:
+      radial-gradient(circle at 20% 30%, rgba(138,121,96,0.05) 0%, transparent 40%),
+      radial-gradient(circle at 80% 70%, rgba(138,121,96,0.04) 0%, transparent 40%),
+      linear-gradient(180deg, rgba(255,253,250,0.5) 0%, transparent 30%);
+    border: 1px solid #dcd3c7;
+    border-radius: 6px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    cursor: pointer;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(38,29,22,0.04), inset 0 1px 0 rgba(255,255,255,0.6);
+  }
+  .novel-scroll::before {
+    content: '';
+    position: absolute;
+    left: 0; right: 0; top: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #8a2d26 0%, #c8453c 35%, #d65650 50%, #c8453c 65%, #8a2d26 100%);
+    background-size: 200% 100%;
+    transition: background-position 0.6s;
+  }
+  .novel-scroll::after {
+    content: '';
+    position: absolute;
+    inset: 4px 0 0 0;
+    background-image:
+      repeating-linear-gradient(90deg, transparent 0, transparent 60px, rgba(138,121,96,0.025) 60px, rgba(138,121,96,0.025) 61px);
+    pointer-events: none;
+  }
+  .novel-scroll:hover {
+    transform: translateY(-3px);
+    border-color: rgba(200,69,60,0.45);
+    box-shadow: 0 12px 28px -8px rgba(38,29,22,0.18), 0 4px 8px -2px rgba(200,69,60,0.08), inset 0 1px 0 rgba(255,255,255,0.6);
+  }
+  .novel-scroll:hover::before { background-position: 100% 0; }
+  .novel-scroll:hover .novel-seal { transform: rotate(-3deg) scale(1.06); }
+  .novel-scroll:hover .novel-title { color: #8a2d26; }
+
+  /* 印章 */
+  .novel-seal {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px; height: 38px;
+    font-family: 'Ma Shan Zheng', cursive;
+    font-size: 13px;
+    letter-spacing: 1px;
+    line-height: 1;
+    text-align: center;
+    border-radius: 5px;
+    transform: rotate(-3deg);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08), inset 0 0 0 1.5px currentColor;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .novel-seal--active    { background: #c8453c; color: #fff; }
+  .novel-seal--planned   { background: #564636; color: #f7f5f2; }
+  .novel-seal--completed { background: linear-gradient(135deg, #d9bd7a, #a88a45); color: #3d3025; box-shadow: 0 2px 4px rgba(168,138,69,0.3), inset 0 0 0 1.5px #3d3025; }
+  .novel-seal--archived  { background: #c4b8a7; color: #564636; }
+  .novel-seal::after {
+    content: '';
+    position: absolute;
+    inset: 2px;
+    border: 0.5px dashed rgba(255,255,255,0.35);
+    border-radius: 3px;
+    pointer-events: none;
+  }
+  .novel-seal--completed::after { border-color: rgba(61,48,37,0.3); }
+
+  /* 卷序号 — 用小薇字 + 边框装饰 */
+  .novel-volnum {
+    font-family: 'ZCOOL XiaoWei', serif;
+    font-size: 11px;
+    color: #8a7960;
+    letter-spacing: 3px;
+    padding: 2px 8px;
+    border: 1px solid #dcd3c7;
+    border-radius: 2px;
+    background: rgba(247,245,242,0.6);
+  }
+
+  /* 标题 */
+  .novel-title {
+    font-family: 'ZCOOL XiaoWei', serif;
+    color: #261d16;
+    transition: color 0.3s;
+    line-height: 1.2;
+  }
+
+  /* 故事梗概分隔线 — 居中短线 */
+  .novel-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #c4b8a7;
+    font-size: 10px;
+    letter-spacing: 4px;
+    font-family: 'ZCOOL XiaoWei', serif;
+  }
+  .novel-divider::before, .novel-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, #dcd3c7, transparent);
+  }
+
+  /* 竹简风格进度条 */
+  .bamboo-progress {
+    display: flex;
+    gap: 2px;
+    height: 8px;
+    background: rgba(220,211,199,0.4);
+    border-radius: 2px;
+    padding: 1.5px;
+    overflow: hidden;
+  }
+  .bamboo-segment {
+    flex: 1;
+    background: #ede8e1;
+    border-radius: 1px;
+    transition: background 0.4s ease;
+  }
+  .bamboo-segment.filled { background: linear-gradient(180deg, #d65650, #c8453c); }
+  .bamboo-segment.filled:last-child { box-shadow: 0 0 0 1px rgba(200,69,60,0.4); }
+
+  /* 元数据三栏 */
+  .novel-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1px;
+    background: #ede8e1;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #ede8e1;
+  }
+  .novel-meta-cell {
+    background: rgba(255,253,250,0.5);
+    padding: 6px 8px;
+    text-align: center;
+  }
+  .novel-meta-num {
+    font-family: 'Noto Serif SC', serif;
+    font-weight: 500;
+    font-size: 14px;
+    color: #3d3025;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+  }
+  .novel-meta-label {
+    font-family: 'ZCOOL XiaoWei', serif;
+    font-size: 10px;
+    color: #8a7960;
+    letter-spacing: 2px;
+    margin-top: 2px;
+  }
+
+  /* 卡片入场动画 — staggered */
+  .scroll-in {
+    opacity: 0;
+    transform: translateY(8px);
+    animation: scrollIn 0.5s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  }
+  @keyframes scrollIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 状态筛选 chip */
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-family: 'ZCOOL XiaoWei', serif;
+    letter-spacing: 1px;
+    color: #6f5e4a;
+    background: rgba(255,253,250,0.6);
+    border: 1px solid #dcd3c7;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .filter-chip:hover { color: #261d16; border-color: #a89880; }
+  .filter-chip.active {
+    color: #fff;
+    background: #3d3025;
+    border-color: #3d3025;
+  }
+  .filter-chip .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  /* 空状态卷轴 SVG */
+  .empty-scroll {
+    width: 160px; height: 200px;
+    margin: 0 auto 24px;
+    opacity: 0.55;
+  }
 </style>
 </head>
 <body class="h-screen overflow-hidden">
 <div class="sidebar-overlay" id="sidebar-overlay"></div>
 <div class="flex h-screen">
-  <aside class="sidebar w-64 flex-shrink-0 flex flex-col paper-bg border-r border-ink-200" id="sidebar">
+  <aside class="sidebar w-64 flex-shrink-0 flex flex-col paper-bg border-r border-ink-200 hidden" id="sidebar">
     <div class="p-6 border-b border-ink-200">
       <div class="flex items-center justify-between">
         <h1 class="font-brush text-3xl text-ink-900 leading-none">墨流</h1>
         <button class="md:hidden text-ink-400" id="close-sidebar">×</button>
       </div>
       <p class="text-xs text-ink-500 mt-1 font-xiaowei tracking-widest">小说创作工作台</p>
+    </div>
+    <div class="px-3 pt-3 border-b border-ink-100">
+      <button id="back-to-library-btn" class="w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm text-ink-700 hover:bg-ink-100 hover:text-vermilion-700 transition group">
+        <svg class="w-4 h-4 transition-transform group-hover:-translate-x-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        <span class="font-xiaowei tracking-wider">返回小说库</span>
+      </button>
     </div>
     <nav class="flex-1 py-2">
       <button data-tab="chat" class="tab-btn active w-full px-6 py-3 text-left flex items-center gap-3 hover:bg-ink-50"><span class="text-lg">💬</span><span class="text-sm font-medium">对话创作</span></button>
@@ -115,24 +328,48 @@ tailwind.config = {
         <div class="w-full bg-ink-200 rounded-full h-1.5 mb-2"><div id="progress-bar" class="bg-vermilion-500 h-1.5 rounded-full transition-all" style="width:0%"></div></div>
         <div id="volume-progress" class="space-y-1"></div>
       </div>
+      <button id="switch-novel-btn" class="w-full mt-3 py-2 rounded-md bg-ink-100 hover:bg-ink-200 text-ink-700 font-medium transition">⇄ 切换小说</button>
     </div>
   </aside>
   <main class="flex-1 flex flex-col overflow-hidden">
     <div class="md:hidden flex items-center justify-between px-4 py-2 border-b border-ink-200 paper-bg">
       <button id="open-sidebar" class="text-ink-600">☰</button>
       <span class="font-brush text-lg text-ink-900">墨流</span>
-      <div class="w-6"></div>
+      <button id="back-to-library-mobile-btn" class="text-ink-600 hover:text-vermilion-600 transition hidden" title="返回小说库">
+        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      </button>
     </div>
 
-    <!-- 对话创作 -->
-    <section id="tab-chat" class="tab-pane flex-1 flex flex-col overflow-hidden">
-      <header class="px-6 py-3 border-b border-ink-200 flex items-center justify-between paper-bg">
-        <div><h2 class="text-base font-bold text-ink-900">对话创作</h2><p id="model-desc" class="text-xs text-ink-500 mt-0.5">选择助手模型开始创作</p></div>
-        <div class="flex items-center gap-2">
-          <button id="smart-gen-btn" class="bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-2 rounded-md text-sm transition flex items-center gap-1"><span>🪄</span><span>智能生成</span></button>
-          <select id="model-select" class="ink-input border border-ink-300 rounded-md px-3 py-2 text-sm bg-white max-w-[200px]"><option value="">加载中...</option></select>
-          <button id="clear-chat" class="text-xs text-ink-500 hover:text-vermilion-600 px-2 py-2">清空</button>
+    <!-- 小说库 -->
+    <section id="library" class="flex-1 flex flex-col overflow-hidden">
+      <header class="px-8 pt-6 pb-4 border-b border-ink-200 paper-bg">
+        <div class="flex items-end justify-between gap-4 mb-4">
+          <div>
+            <div class="flex items-baseline gap-3">
+              <h2 class="font-brush text-3xl text-ink-900 leading-none">小说库</h2>
+              <span class="seal text-xs">藏书阁</span>
+            </div>
+            <p class="text-xs text-ink-500 mt-2 font-xiaowei tracking-widest" id="library-subtitle">选择一部小说 · 开卷有益</p>
+          </div>
+          <button id="new-novel-btn" class="group flex items-center gap-2 bg-vermilion-500 hover:bg-vermilion-600 text-white px-5 py-2.5 rounded-md text-sm transition shadow-sm hover:shadow-md">
+            <svg class="w-4 h-4 transition-transform group-hover:rotate-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>
+            <span class="font-xiaowei tracking-wider">研墨开笔</span>
+          </button>
         </div>
+        <div class="flex items-center gap-2 flex-wrap" id="library-filters">
+          <button class="filter-chip active" data-filter="all"><span class="dot bg-ink-400"></span>全部 <span class="opacity-60" data-count="all">0</span></button>
+          <button class="filter-chip" data-filter="active"><span class="dot bg-vermilion-500"></span>创作中 <span class="opacity-60" data-count="active">0</span></button>
+          <button class="filter-chip" data-filter="planned"><span class="dot bg-ink-500"></span>规划中 <span class="opacity-60" data-count="planned">0</span></button>
+          <button class="filter-chip" data-filter="completed"><span class="dot bg-gold-500"></span>已完结 <span class="opacity-60" data-count="completed">0</span></button>
+        </div>
+      </header>
+      <div id="novels-list" class="flex-1 overflow-y-auto scrollbar p-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 content-start"></div>
+    </section>
+
+    <!-- 对话创作 -->
+    <section id="tab-chat" class="tab-pane flex-1 flex flex-col overflow-hidden hidden">
+      <header class="px-6 py-3 border-b border-ink-200 flex items-center paper-bg">
+        <div><h2 class="text-base font-bold text-ink-900">对话创作</h2><p id="model-desc" class="text-xs text-ink-500 mt-0.5">对话式小说创作助手</p></div>
       </header>
       <div id="chat-messages" class="flex-1 overflow-y-auto scrollbar px-6 py-6 space-y-4">
         <div class="msg-ai rounded-lg p-5 max-w-3xl mx-auto fade-in">
@@ -168,9 +405,6 @@ tailwind.config = {
         <div class="flex items-center gap-2 flex-wrap">
           <select id="volume-filter" class="ink-input border border-ink-300 rounded px-2 py-1 text-sm bg-white"><option value="">全部卷</option></select>
           <input id="chapter-search" type="text" placeholder="搜索标题..." class="ink-input w-32 border border-ink-300 rounded px-2 py-1 text-sm bg-white">
-          <button id="prev-page" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-1 rounded text-sm">‹</button>
-          <span id="page-info" class="text-xs text-ink-500 px-1">1-50</span>
-          <button id="next-page" class="bg-ink-100 hover:bg-ink-200 text-ink-700 px-3 py-1 rounded text-sm">›</button>
         </div>
       </header>
       <div id="chapters-list" class="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
@@ -219,7 +453,7 @@ tailwind.config = {
 <script>
 const API = '/api/v1';
 const OPENAI_API = '/v1';
-const state = { models: [], currentModel: '', messages: [], volumes: [], volumeFilter: '', chapterSearch: '', chapterRange: { start: 1, end: 50 }, pageSize: 50 };
+const state = { models: [], currentModel: '', messages: [], volumes: [], volumeFilter: '', chapterSearch: '', chapterRange: { start: 1, end: 50 }, pageSize: 50, currentNovelId: null, novels: [], novelFilter: 'all' };
 
 // Toast
 function toast(msg, type, duration) {
@@ -264,14 +498,256 @@ function renderMarkdown(text) {
   html = html.replace(/<pre>([\s\S]*?)<\/pre>/g, function(m,c){ return '<pre>'+c.replace(/<br>/g,'\n')+'</pre>'; });
   return html;
 }
-function skeletonCard() { return '<div class="paper-bg border border-ink-200 rounded-lg p-4"><div class="skeleton h-4 w-1/3 mb-3"></div><div class="skeleton h-3 w-full mb-2"></div><div class="skeleton h-3 w-2/3"></div></div>'; }
+function skeletonCard() {
+  return '<div class="novel-scroll p-5" style="pointer-events:none">'
+    + '<div class="flex items-start justify-between mb-3"><div class="skeleton h-5 w-16 rounded"></div><div class="skeleton h-9 w-9 rounded"></div></div>'
+    + '<div class="skeleton h-6 w-3/4 mb-2 rounded"></div>'
+    + '<div class="skeleton h-3 w-1/2 mb-4 rounded"></div>'
+    + '<div class="novel-divider my-3"><span>·</span></div>'
+    + '<div class="skeleton h-3 w-full mb-1.5 rounded"></div>'
+    + '<div class="skeleton h-3 w-5/6 mb-4 rounded"></div>'
+    + '<div class="bamboo-progress mb-4"><div class="bamboo-segment"></div><div class="bamboo-segment"></div><div class="bamboo-segment"></div><div class="bamboo-segment"></div><div class="bamboo-segment"></div><div class="bamboo-segment"></div><div class="bamboo-segment"></div><div class="bamboo-segment"></div></div>'
+    + '<div class="novel-meta"><div class="novel-meta-cell"><div class="skeleton h-4 w-10 mx-auto rounded"></div><div class="skeleton h-2.5 w-8 mx-auto mt-1.5 rounded"></div></div><div class="novel-meta-cell"><div class="skeleton h-4 w-10 mx-auto rounded"></div><div class="skeleton h-2.5 w-8 mx-auto mt-1.5 rounded"></div></div><div class="novel-meta-cell"><div class="skeleton h-4 w-10 mx-auto rounded"></div><div class="skeleton h-2.5 w-8 mx-auto mt-1.5 rounded"></div></div></div>'
+    + '</div>';
+}
+
+// 中文数字 — 用于卷序号
+function cnNum(n) {
+  const d = ['零','壹','贰','叁','肆','伍','陆','柒','捌','玖'];
+  if (n === 0) return '零';
+  if (n < 10) return d[n];
+  if (n < 20) return '拾' + (n % 10 ? d[n % 10] : '');
+  if (n < 100) {
+    const t = Math.floor(n / 10), u = n % 10;
+    return d[t] + '拾' + (u ? d[u] : '');
+  }
+  return String(n);
+}
+
+// 状态印章文字
+function sealText(status) {
+  return ({ active: '進行', planned: '待啟', completed: '完稿', archived: '歸檔' })[status] || '待啟';
+}
+
+function isGlobalPath(path) {
+  return path === '/novels' || path.indexOf('/novels/') === 0 || path === '/relationships/types';
+}
 
 async function api(path, options) {
   options = options || {};
-  const res = await fetch(API + path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options));
+  let url = API + path;
+  if (state.currentNovelId != null && !isGlobalPath(path)) {
+    url += (path.indexOf('?') >= 0 ? '&' : '?') + 'novel_id=' + state.currentNovelId;
+  }
+  const res = await fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options));
   if (!res.ok) { const err = await res.json().catch(function(){ return {detail: res.statusText}; }); throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail)); }
   return res.status === 204 ? null : res.json();
 }
+
+// 小说库
+function formatWords(w) {
+  w = w || 0;
+  if (w >= 10000) return (w / 10000).toFixed(1) + ' 万字';
+  return w.toLocaleString() + ' 字';
+}
+
+async function loadNovels() {
+  const list = document.getElementById('novels-list');
+  list.innerHTML = skeletonCard() + skeletonCard() + skeletonCard() + skeletonCard();
+  try {
+    const novels = await api('/novels');
+    state.novels = novels;
+    updateLibraryStats(novels);
+    if (novels.length === 0) {
+      list.innerHTML = '<div class="col-span-full text-center py-20">'
+        + '<svg class="empty-scroll" viewBox="0 0 160 200" xmlns="http://www.w3.org/2000/svg">'
+        + '<rect x="20" y="20" width="120" height="160" rx="4" fill="none" stroke="#a89880" stroke-width="1.5" stroke-dasharray="4 3"/>'
+        + '<line x1="20" y1="40" x2="140" y2="40" stroke="#a89880" stroke-width="1" stroke-dasharray="2 2"/>'
+        + '<line x1="20" y1="160" x2="140" y2="160" stroke="#a89880" stroke-width="1" stroke-dasharray="2 2"/>'
+        + '<circle cx="80" cy="100" r="22" fill="none" stroke="#c8453c" stroke-width="2" opacity="0.5"/>'
+        + '<text x="80" y="106" text-anchor="middle" fill="#c8453c" font-family="serif" font-size="16" opacity="0.7">空</text>'
+        + '<rect x="68" y="135" width="24" height="24" fill="#c8453c" opacity="0.15" rx="2" transform="rotate(-3 80 147)"/>'
+        + '</svg>'
+        + '<p class="font-xiaowei text-ink-400 mb-1 tracking-widest">书架空空 · 等候新作</p>'
+        + '<p class="text-xs text-ink-300 mb-6">点击下方按钮,启笔第一卷</p>'
+        + '<button onclick="openNovelModal()" class="inline-flex items-center gap-2 bg-vermilion-500 hover:bg-vermilion-600 text-white px-5 py-2.5 rounded-md text-sm transition shadow-sm hover:shadow-md"><svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg><span class="font-xiaowei tracking-wider">研墨开笔</span></button>'
+        + '</div>';
+      return;
+    }
+    renderNovelList(novels);
+    novels.forEach(function(n) {
+      fetch(API + '/status?novel_id=' + n.id).then(function(r){ return r.json(); }).then(function(st) {
+        const total = st.total_chapters || 0;
+        const target = n.target_chapters || 1;
+        const pct = Math.min(100, Math.round(total / target * 100));
+        const card = document.querySelector('[data-novel-card="'+n.id+'"]');
+        if (!card) return;
+        // 竹简进度条
+        const bar = card.querySelector('.bamboo-progress');
+        if (bar) {
+          const segs = bar.children;
+          const filled = Math.round((pct / 100) * segs.length);
+          for (let i = 0; i < segs.length; i++) segs[i].classList.toggle('filled', i < filled);
+        }
+        const pctEl = card.querySelector('[data-novel-pct]');
+        if (pctEl) pctEl.textContent = pct + '%';
+        // 元数据
+        const chCell = card.querySelector('[data-meta="chapters"]');
+        if (chCell) chCell.textContent = total;
+        const targetCell = card.querySelector('[data-meta="target"]');
+        if (targetCell) targetCell.textContent = '/ ' + target;
+        const wordsCell = card.querySelector('[data-meta="words"]');
+        if (wordsCell) wordsCell.textContent = (st.total_words >= 10000 ? (st.total_words / 10000).toFixed(1) + '万' : st.total_words);
+        const volCell = card.querySelector('[data-meta="volumes"]');
+        if (volCell) volCell.textContent = st.total_volumes || 0;
+        const charCell = card.querySelector('[data-meta="characters"]');
+        if (charCell) charCell.textContent = st.total_characters || 0;
+      }).catch(function(){});
+    });
+  } catch(e) {
+    list.innerHTML = '<div class="text-center text-vermilion-600 py-12 col-span-full">加载失败: '+escapeHtml(e.message)+'</div>';
+  }
+}
+
+// 更新顶部统计 + 筛选 chip 计数
+function updateLibraryStats(novels) {
+  const counts = { all: novels.length, active: 0, planned: 0, completed: 0, archived: 0 };
+  novels.forEach(function(n) { counts[n.status] = (counts[n.status] || 0) + 1; });
+  Object.keys(counts).forEach(function(k) {
+    const el = document.querySelector('[data-count="'+k+'"]');
+    if (el) el.textContent = '(' + counts[k] + ')';
+  });
+  const sub = document.getElementById('library-subtitle');
+  if (sub) {
+    const totalWords = novels.reduce(function(s, n){ return s + (n.total_words || 0); }, 0);
+    sub.textContent = '共 ' + novels.length + ' 卷 · 择一而入 · 开卷有益';
+  }
+}
+
+// 渲染小说卡片列表(应用筛选)
+function renderNovelList(novels) {
+  const list = document.getElementById('novels-list');
+  const filtered = state.novelFilter === 'all'
+    ? novels
+    : novels.filter(function(n) { return n.status === state.novelFilter; });
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="col-span-full text-center py-20 text-ink-400">'
+      + '<div class="font-xiaowei tracking-widest text-ink-400 mb-2">此栏空空</div>'
+      + '<p class="text-xs text-ink-300">切换其他筛选查看</p></div>';
+    return;
+  }
+  list.innerHTML = filtered.map(function(n, i) {
+    return renderNovelCard(n, i);
+  }).join('');
+}
+
+// 单张古卷卡片
+function renderNovelCard(n, idx) {
+  const premise = n.premise ? escapeHtml(n.premise) : '<span class="text-ink-300 italic">尚未立意</span>';
+  const genre = n.genre ? escapeHtml(n.genre) : '未分类';
+  const subtitle = n.subtitle ? escapeHtml(n.subtitle) : '';
+  return '<div class="novel-scroll scroll-in" style="animation-delay:' + (idx * 60) + 'ms" data-novel-card="'+n.id+'" onclick="selectNovel('+n.id+')">'
+    + '<div class="relative p-5">'
+    // 顶部:卷序号 + 印章
+    + '<div class="flex items-start justify-between mb-4">'
+    + '<span class="novel-volnum">卷 ' + cnNum(n.id) + '</span>'
+    + '<div class="novel-seal novel-seal--' + (n.status || 'planned') + '" title="' + ({active:'创作中',planned:'规划中',completed:'已完结',archived:'已归档'})[n.status || 'planned'] + '">' + sealText(n.status) + '</div>'
+    + '</div>'
+    // 标题
+    + '<h3 class="novel-title text-2xl mb-1 truncate">' + escapeHtml(n.title) + '</h3>'
+    + '<div class="text-xs text-ink-400 mb-3 font-xiaowei tracking-wider truncate">' + genre + (subtitle ? ' · ' + subtitle : '') + '</div>'
+    // 梗概
+    + '<div class="novel-divider my-3"><span>故事</span></div>'
+    + '<p class="text-xs text-ink-600 leading-relaxed line-clamp-2 mb-4" style="min-height:32px">' + premise + '</p>'
+    // 进度
+    + '<div class="flex items-center gap-3 mb-4">'
+    + '<div class="bamboo-progress flex-1">'
+    + Array.from({length: 10}, function(){ return '<div class="bamboo-segment"></div>'; }).join('')
+    + '</div>'
+    + '<span class="text-xs text-ink-500 whitespace-nowrap tabular-nums font-medium" data-novel-pct="">-</span>'
+    + '</div>'
+    // 元数据三栏
+    + '<div class="novel-meta">'
+    + '<div class="novel-meta-cell"><div class="novel-meta-num" data-meta="chapters">-</div><div class="novel-meta-label">章</div></div>'
+    + '<div class="novel-meta-cell"><div class="novel-meta-num"><span data-meta="words">-</span><span class="text-xs text-ink-400 ml-0.5" data-meta="target" style="font-weight:400"></span></div><div class="novel-meta-label">字数</div></div>'
+    + '<div class="novel-meta-cell"><div class="novel-meta-num" data-meta="characters">-</div><div class="novel-meta-label">角色</div></div>'
+    + '</div>'
+    + '</div></div>';
+}
+
+// 切换状态筛选
+window.setNovelFilter = function(filter) {
+  state.novelFilter = filter;
+  document.querySelectorAll('#library-filters .filter-chip').forEach(function(c) {
+    c.classList.toggle('active', c.dataset.filter === filter);
+  });
+  renderNovelList(state.novels);
+}
+
+window.selectNovel = function(id) {
+  state.currentNovelId = id;
+  state.messages = [];
+  state.volumeFilter = '';
+  state.chapterSearch = '';
+  state.chapterRange = { start: 1, end: 50 };
+  state.volumes = [];
+  graphData = null;
+  if (graphChart) { graphChart.dispose(); graphChart = null; }
+  document.getElementById('chapters-list').dataset.loaded = '';
+  document.getElementById('chat-messages').innerHTML = '<div class="msg-ai rounded-lg p-5 max-w-3xl mx-auto fade-in"><p class="text-sm text-ink-700 leading-relaxed"><span class="font-brush text-vermilion-600 text-xl">歡迎。</span> 選擇上方的助手模型，告訴我你想創作什麼。</p></div>';
+  document.getElementById('sidebar').classList.remove('hidden');
+  document.getElementById('library').classList.add('hidden');
+  const mobBack = document.getElementById('back-to-library-mobile-btn');
+  if (mobBack) mobBack.classList.remove('hidden');
+  switchTab('chat');
+  checkStatus();
+  loadProgress();
+  loadVolumes();
+};
+
+window.backToLibrary = function() {
+  document.getElementById('sidebar').classList.add('hidden');
+  document.getElementById('library').classList.remove('hidden');
+  // 隐藏所有 tab-pane,避免对话框/卷宗等残留在下方
+  document.querySelectorAll('.tab-pane').forEach(function(p) { p.classList.add('hidden'); });
+  // 重置 tab 激活态
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); b.classList.add('text-ink-600'); });
+  const mobBack = document.getElementById('back-to-library-mobile-btn');
+  if (mobBack) mobBack.classList.add('hidden');
+  state.currentNovelId = null;
+  loadNovels();
+};
+
+window.openNovelModal = function() {
+  showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-4">新建小说</h3><div class="space-y-4"><div><label class="text-xs text-ink-500 block mb-1">书名 *</label><input id="nv-title" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" placeholder="例：亡灵银行"></div><div><label class="text-xs text-ink-500 block mb-1">副标题</label><input id="nv-subtitle" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white"></div><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">类型</label><input id="nv-genre" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" placeholder="例：都市"></div><div><label class="text-xs text-ink-500 block mb-1">目标章数</label><input id="nv-target" type="number" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="1000"></div></div><div><label class="text-xs text-ink-500 block mb-1">一句话简介</label><textarea id="nv-premise" rows="3" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none" placeholder="故事的核心设定..."></textarea></div></div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-novel-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">创建</button></div></div>');
+  document.getElementById('save-novel-btn').addEventListener('click', async function() {
+    const title = document.getElementById('nv-title').value.trim();
+    if (!title) { toast('请填书名', 'warn'); return; }
+    const body = {
+      title: title,
+      subtitle: document.getElementById('nv-subtitle').value.trim(),
+      genre: document.getElementById('nv-genre').value.trim(),
+      premise: document.getElementById('nv-premise').value.trim(),
+      target_chapters: parseInt(document.getElementById('nv-target').value) || 1000,
+    };
+    try {
+      const nv = await api('/novels', { method: 'POST', body: JSON.stringify(body) });
+      toast('小说「'+nv.title+'」已创建', 'success');
+      closeModal();
+      loadNovels();
+    } catch(e) { toast('创建失败: ' + e.message, 'error'); }
+  });
+};
+
+document.getElementById('new-novel-btn').addEventListener('click', openNovelModal);
+document.getElementById('switch-novel-btn').addEventListener('click', backToLibrary);
+document.getElementById('back-to-library-btn').addEventListener('click', backToLibrary);
+document.getElementById('back-to-library-mobile-btn').addEventListener('click', backToLibrary);
+document.getElementById('library-filters').addEventListener('click', function(e) {
+  const chip = e.target.closest('.filter-chip');
+  if (!chip) return;
+  window.setNovelFilter(chip.dataset.filter);
+});
 
 async function checkStatus() {
   try {
@@ -322,20 +798,15 @@ async function loadModels() {
   try {
     const res = await fetch(OPENAI_API + '/models');
     const data = await res.json();
-    const sel = document.getElementById('model-select');
-    sel.innerHTML = '';
     state.models = data.data || [];
-    if (state.models.length === 0) { sel.innerHTML = '<option value="">无可用模型</option>'; return; }
-    state.models.forEach(function(m) { const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.name || m.id; sel.appendChild(opt); });
-    state.currentModel = state.models[0].id;
-    updateModelDesc();
-  } catch(e) { document.getElementById('model-select').innerHTML = '<option value="">加载失败</option>'; }
+    state.currentModel = state.models.length > 0 ? state.models[0].id : '';
+  } catch(e) { /* 模型加载失败不影响使用 */ }
+  updateModelDesc();
 }
 function updateModelDesc() {
   const m = state.models.find(function(x){ return x.id === state.currentModel; });
-  document.getElementById('model-desc').textContent = (m && m.description) || '选择助手模型开始创作';
+  document.getElementById('model-desc').textContent = (m && m.description) || '对话式小说创作助手';
 }
-document.getElementById('model-select').addEventListener('change', function(e) { state.currentModel = e.target.value; updateModelDesc(); });
 
 // 对话
 const chatBox = document.getElementById('chat-messages');
@@ -376,7 +847,7 @@ async function sendMessage() {
   try {
     const res = await fetch(OPENAI_API + '/chat/completions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: state.currentModel, messages: state.messages, stream: true })
+      body: JSON.stringify({ model: state.currentModel, messages: state.messages, stream: true, novel_id: state.currentNovelId })
     });
     const typing = document.getElementById('typing-indicator'); if (typing) typing.remove();
     if (!res.ok) {
@@ -410,14 +881,6 @@ async function sendMessage() {
 }
 sendBtn.addEventListener('click', sendMessage);
 chatInput.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
-document.getElementById('clear-chat').addEventListener('click', async function() {
-  if (state.messages.length === 0) return;
-  const ok = await confirmDialog('清空对话', '确定清空所有对话历史？');
-  if (!ok) return;
-  state.messages = [];
-  chatBox.innerHTML = '<div class="msg-ai rounded-lg p-5 max-w-3xl mx-auto fade-in"><p class="text-sm text-ink-700 leading-relaxed"><span class="font-brush text-vermilion-600 text-xl">對話已清空。</span> 開始新的創作吧。</p></div>';
-  toast('对话已清空', 'success');
-});
 
 // 卷宗
 async function loadVolumes() {
@@ -482,14 +945,12 @@ document.getElementById('new-volume-btn').addEventListener('click', function() {
 async function loadChapters() {
   const list = document.getElementById('chapters-list');
   list.innerHTML = Array(6).fill(skeletonCard()).join('');
-  const start = state.chapterRange.start, end = state.chapterRange.end;
   const volParam = state.volumeFilter ? '&volume_id='+state.volumeFilter : '';
   try {
-    const data = await api('/chapters?start='+start+'&end='+end+volParam);
+    const data = await api('/chapters?start=1&end=1000'+volParam);
     let chapters = data.chapters || [];
     if (state.chapterSearch) chapters = chapters.filter(function(c){ return c.title && c.title.includes(state.chapterSearch); });
-    document.getElementById('chapter-count').textContent = '共 '+data.total+' 章'+(state.volumeFilter?'（当前卷）':'');
-    document.getElementById('page-info').textContent = start+'-'+end;
+    document.getElementById('chapter-count').textContent = '共 '+chapters.length+' 章'+(state.volumeFilter?'（当前卷）':'');
     if (chapters.length === 0) { list.innerHTML = '<div class="text-center py-16 col-span-full"><div class="text-4xl mb-3">📭</div><p class="text-ink-400">该范围无章节</p></div>'; return; }
     const emotionColor = { '紧张':'border-vermilion-500', '悲伤':'border-ink-400', '轻松':'border-bamboo-500', '兴奋':'border-gold-500', '愤怒':'border-vermilion-600', '温馨':'border-gold-400' };
     const emotionBg = { '紧张':'bg-vermilion-500/10', '悲伤':'bg-ink-400/10', '轻松':'bg-bamboo-500/10', '兴奋':'bg-gold-500/10' };
@@ -501,11 +962,30 @@ async function loadChapters() {
 window.showChapterDetail = async function(chNum) {
   try {
     const ch = await api('/chapters/'+chNum);
+    let totalChapters = state.totalChapters || 0;
+    if (!totalChapters) {
+      try { const st = await api('/status'); totalChapters = st.total_chapters || 0; state.totalChapters = totalChapters; } catch(e) {}
+    }
+    const hasPrev = ch.chapter_num > 1;
+    const hasNext = totalChapters > 0 ? ch.chapter_num < totalChapters : true;
     const metaHtml = '<div class="text-xs text-ink-500 flex gap-4 mb-4 pb-3 border-b border-ink-100 flex-wrap"><span>📊 '+ch.word_count+'字</span>'+(ch.emotion?'<span>🎭 '+escapeHtml(ch.emotion)+'</span>':'')+(ch.volume_id?'<span>📖 卷'+ch.volume_id+'</span>':'')+'</div>'+(ch.summary?'<div class="bg-ink-50 rounded p-3 mb-4 text-sm text-ink-700"><b>摘要：</b>'+escapeHtml(ch.summary)+'</div>':'')+(ch.key_events&&ch.key_events.length?'<div class="mb-4 text-sm"><b class="text-ink-700">关键事件：</b><ul class="mt-1 text-ink-600">'+ch.key_events.map(function(e){ return '<li>• '+escapeHtml(e)+'</li>'; }).join('')+'</ul></div>':'');
-    const contentHtml = '<div id="ch-content-view" class="text-ink-800 leading-relaxed whitespace-pre-wrap text-sm">'+(escapeHtml(ch.content)||'<span class="text-ink-400">（无正文）</span>')+'</div>';
+    const contentHtml = '<div class="flex items-center justify-between mb-2"><span class="text-xs font-medium text-ink-700">正文</span><button id="ch-copy-content-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">📋 复制正文</button></div><div id="ch-content-view" class="text-ink-800 leading-relaxed whitespace-pre-wrap text-sm">'+(escapeHtml(ch.content)||'<span class="text-ink-400">（无正文）</span>')+'</div>';
     const editHtml = '<div id="ch-content-edit" class="hidden"><textarea id="ch-edit-area" class="ink-input w-full border border-ink-300 rounded p-3 text-sm bg-white resize-none font-serif" style="min-height:400px">'+escapeHtml(ch.content)+'</textarea></div>';
     const versionHtml = '<div id="ch-versions-panel" class="hidden mt-4 pt-4 border-t border-ink-100"><div class="flex items-center justify-between mb-2"><span class="text-xs font-medium text-ink-700">版本历史</span><button id="refresh-versions-btn" class="text-xs text-ink-500 hover:text-vermilion-600">刷新</button></div><div id="ch-versions-list" class="space-y-1 max-h-40 overflow-y-auto scrollbar"></div></div>';
-    showModal('<div class="flex flex-col max-h-[85vh]"><div class="px-6 py-4 border-b border-ink-200 flex items-center justify-between"><div><h3 class="font-brush text-2xl text-vermilion-700">第'+ch.chapter_num+'章</h3><p class="text-sm text-ink-600 mt-1">'+escapeHtml(ch.title)+'</p></div><div class="flex items-center gap-2"><button id="ch-edit-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">编辑</button><button id="ch-versions-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">版本</button><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600 text-xl ml-1">×</button></div></div><div class="px-6 py-4 overflow-y-auto scrollbar flex-1" id="ch-detail-body">'+metaHtml+contentHtml+editHtml+versionHtml+'</div><div id="ch-edit-actions" class="hidden px-6 py-3 border-t border-ink-200 flex justify-end gap-2 bg-ink-50"><button id="ch-cancel-edit-btn" class="text-xs text-ink-600 hover:bg-ink-100 px-3 py-2 rounded">取消</button><button id="ch-save-btn" class="text-xs bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-2 rounded">保存新版本</button></div></div>', true);
+    showModal('<div class="flex flex-col max-h-[85vh]"><div class="px-6 py-4 border-b border-ink-200 flex items-center justify-between gap-3"><div class="flex items-center gap-3 min-w-0"><div class="min-w-0"><h3 class="font-brush text-2xl text-vermilion-700">第'+ch.chapter_num+'章</h3><p class="text-sm text-ink-600 mt-1 truncate">'+escapeHtml(ch.title)+'</p></div><button id="ch-copy-title-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded whitespace-nowrap">📋 复制标题</button></div><div class="flex items-center gap-2 flex-shrink-0"><button id="ch-prev-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"'+(hasPrev?'':' disabled')+'>‹ 上一章</button><button id="ch-next-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded disabled:opacity-40 disabled:cursor-not-allowed"'+(hasNext?'':' disabled')+'>下一章 ›</button><button id="ch-edit-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">编辑</button><button id="ch-versions-btn" class="text-xs bg-ink-100 hover:bg-ink-200 text-ink-700 px-2 py-1 rounded">版本</button><button onclick="closeModal()" class="text-ink-400 hover:text-vermilion-600 text-xl ml-1">×</button></div></div><div class="px-6 py-4 overflow-y-auto scrollbar flex-1" id="ch-detail-body">'+metaHtml+contentHtml+editHtml+versionHtml+'</div><div id="ch-edit-actions" class="hidden px-6 py-3 border-t border-ink-200 flex justify-end gap-2 bg-ink-50"><button id="ch-cancel-edit-btn" class="text-xs text-ink-600 hover:bg-ink-100 px-3 py-2 rounded">取消</button><button id="ch-save-btn" class="text-xs bg-vermilion-500 hover:bg-vermilion-600 text-white px-3 py-2 rounded">保存新版本</button></div></div>', true);
+
+    // 复制标题
+    document.getElementById('ch-copy-title-btn').addEventListener('click', function() {
+      navigator.clipboard.writeText(ch.title).then(function() { toast('章节名已复制', 'success'); }).catch(function() { toast('复制失败', 'error'); });
+    });
+    // 复制正文
+    document.getElementById('ch-copy-content-btn').addEventListener('click', function() {
+      if (!ch.content) { toast('无正文可复制', 'warn'); return; }
+      navigator.clipboard.writeText(ch.content).then(function() { toast('正文已复制', 'success'); }).catch(function() { toast('复制失败', 'error'); });
+    });
+    // 翻章
+    document.getElementById('ch-prev-btn').addEventListener('click', function() { showChapterDetail(ch.chapter_num - 1); });
+    document.getElementById('ch-next-btn').addEventListener('click', function() { showChapterDetail(ch.chapter_num + 1); });
 
     // 编辑模式切换
     document.getElementById('ch-edit-btn').addEventListener('click', function() {
@@ -595,24 +1075,14 @@ window.showChapterDetail = async function(chNum) {
     document.getElementById('refresh-versions-btn').addEventListener('click', loadVersions);
   } catch(e) { toast('加载失败: ' + e.message, 'error'); }
 };
-document.getElementById('volume-filter').addEventListener('change', function(e) { state.volumeFilter = e.target.value; state.chapterRange = { start: 1, end: 50 }; loadChapters(); });
+document.getElementById('volume-filter').addEventListener('change', function(e) { state.volumeFilter = e.target.value; loadChapters(); });
 document.getElementById('chapter-search').addEventListener('input', function(e) { state.chapterSearch = e.target.value.trim(); loadChapters(); });
-document.getElementById('prev-page').addEventListener('click', function() {
-  if (state.chapterRange.start <= 1) { toast('已是第一页', 'info', 1500); return; }
-  const start = Math.max(1, state.chapterRange.start - state.pageSize);
-  state.chapterRange = { start: start, end: start + state.pageSize - 1 };
-  loadChapters();
-});
-document.getElementById('next-page').addEventListener('click', function() {
-  state.chapterRange = { start: state.chapterRange.end + 1, end: state.chapterRange.end + state.pageSize };
-  loadChapters();
-});
 
 // 世界设定
 async function loadSettings() {
   try {
     const w = await api('/world');
-    document.getElementById('world-info').innerHTML = (w.world_name||w.era||w.summary) ? '<div class="grid grid-cols-2 gap-4 mb-3">'+(w.world_name?'<div><span class="text-ink-400 text-xs">世界名</span><div class="text-ink-800">'+escapeHtml(w.world_name)+'</div></div>':'')+(w.era?'<div><span class="text-ink-400 text-xs">时代</span><div class="text-ink-800">'+escapeHtml(w.era)+'</div></div>':'')+(w.genre?'<div><span class="text-ink-400 text-xs">类型</span><div class="text-ink-800">'+escapeHtml(w.genre)+'</div></div>':'')+'</div>'+(w.summary?'<div class="mt-3 pt-3 border-t border-ink-100"><span class="text-ink-400 text-xs">摘要</span><div class="text-ink-700 mt-1">'+escapeHtml(w.summary)+'</div></div>':'')+(w.key_constraints&&w.key_constraints.length?'<div class="mt-2"><span class="text-ink-400 text-xs">约束</span><div class="mt-1 flex flex-wrap gap-1">'+w.key_constraints.map(function(c){ return '<span class="inline-block bg-ink-100 rounded px-2 py-0.5 text-xs text-ink-600">'+escapeHtml(c)+'</span>'; }).join('')+'</div></div>':'') : '<span class="text-ink-400">未设置世界观</span>';
+    document.getElementById('world-info').innerHTML = (w.era||(w.core_rules&&w.core_rules.length)||w.power_system||w.faction_summary||(w.key_constraints&&w.key_constraints.length)||w.narrative_style) ? (w.era?'<div class="mb-3"><span class="text-ink-400 text-xs">时代</span><div class="text-ink-800 mt-1">'+escapeHtml(w.era)+'</div></div>':'')+(w.core_rules&&w.core_rules.length?'<div class="mb-3"><span class="text-ink-400 text-xs">核心规则</span><ul class="mt-1 text-ink-700 space-y-1">'+w.core_rules.map(function(r){ return '<li>• '+escapeHtml(r)+'</li>'; }).join('')+'</ul></div>':'')+(w.power_system?'<div class="mb-3"><span class="text-ink-400 text-xs">力量体系</span><div class="text-ink-700 mt-1">'+escapeHtml(w.power_system)+'</div></div>':'')+(w.faction_summary?'<div class="mb-3"><span class="text-ink-400 text-xs">势力概况</span><div class="text-ink-700 mt-1">'+escapeHtml(w.faction_summary)+'</div></div>':'')+(w.key_constraints&&w.key_constraints.length?'<div class="mb-3"><span class="text-ink-400 text-xs">硬约束</span><div class="mt-1 flex flex-wrap gap-1">'+w.key_constraints.map(function(c){ return '<span class="inline-block bg-ink-100 rounded px-2 py-0.5 text-xs text-ink-600">'+escapeHtml(c)+'</span>'; }).join('')+'</div></div>':'')+(w.narrative_style?'<div><span class="text-ink-400 text-xs">叙事基调</span><div class="text-ink-700 mt-1">'+escapeHtml(w.narrative_style)+'</div></div>':'') : '<span class="text-ink-400">未设置世界观</span>';
   } catch(e) { document.getElementById('world-info').innerHTML = '<span class="text-vermilion-600">加载失败</span>'; }
   try {
     const chars = await api('/characters');
@@ -639,11 +1109,19 @@ async function loadSettings() {
 document.getElementById('edit-world-btn').addEventListener('click', async function() {
   let w = {};
   try { w = await api('/world'); } catch(e) {}
-  showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-4">编辑世界观</h3><div class="space-y-4"><div class="grid grid-cols-2 gap-3"><div><label class="text-xs text-ink-500 block mb-1">世界名</label><input id="w-name" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.world_name||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">时代</label><input id="w-era" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.era||'')+'"></div></div><div><label class="text-xs text-ink-500 block mb-1">类型</label><input id="w-genre" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.genre||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">约束（逗号分隔）</label><input id="w-constraints" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml((w.key_constraints||[]).join(', '))+'"></div><div><label class="text-xs text-ink-500 block mb-1">摘要</label><textarea id="w-summary" rows="4" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none">'+escapeHtml(w.summary||'')+'</textarea></div></div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-world-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">保存</button></div></div>');
+  showModal('<div class="p-6"><h3 class="font-bold text-lg text-ink-900 mb-4">编辑世界观</h3><div class="space-y-4"><div><label class="text-xs text-ink-500 block mb-1">时代</label><input id="w-era" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.era||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">核心规则（每行一条）</label><textarea id="w-core-rules" rows="3" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none">'+escapeHtml((w.core_rules||[]).join('\n'))+'</textarea></div><div><label class="text-xs text-ink-500 block mb-1">力量体系</label><input id="w-power-system" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white" value="'+escapeHtml(w.power_system||'')+'"></div><div><label class="text-xs text-ink-500 block mb-1">势力概况</label><textarea id="w-faction" rows="3" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none">'+escapeHtml(w.faction_summary||'')+'</textarea></div><div><label class="text-xs text-ink-500 block mb-1">硬约束（每行一条）</label><textarea id="w-constraints" rows="3" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none">'+escapeHtml((w.key_constraints||[]).join('\n'))+'</textarea></div><div><label class="text-xs text-ink-500 block mb-1">叙事基调</label><textarea id="w-narrative" rows="2" class="ink-input w-full border border-ink-300 rounded px-3 py-2 text-sm bg-white resize-none">'+escapeHtml(w.narrative_style||'')+'</textarea></div></div><div class="flex justify-end gap-3 mt-6"><button onclick="closeModal()" class="px-4 py-2 text-sm text-ink-600 hover:bg-ink-100 rounded">取消</button><button id="save-world-btn" class="px-4 py-2 text-sm bg-vermilion-500 hover:bg-vermilion-600 text-white rounded">保存</button></div></div>');
   document.getElementById('save-world-btn').addEventListener('click', async function() {
     try {
-      const constraints = document.getElementById('w-constraints').value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
-      await api('/world', { method: 'PUT', body: JSON.stringify({ world_name: document.getElementById('w-name').value, era: document.getElementById('w-era').value, genre: document.getElementById('w-genre').value, key_constraints: constraints, summary: document.getElementById('w-summary').value }) });
+      const lines = function(v){ return v.split('\n').map(function(s){ return s.trim(); }).filter(Boolean); };
+      const body = {
+        era: document.getElementById('w-era').value.trim(),
+        core_rules: lines(document.getElementById('w-core-rules').value),
+        power_system: document.getElementById('w-power-system').value.trim(),
+        faction_summary: document.getElementById('w-faction').value.trim(),
+        key_constraints: lines(document.getElementById('w-constraints').value),
+        narrative_style: document.getElementById('w-narrative').value.trim(),
+      };
+      await api('/world', { method: 'PUT', body: JSON.stringify(body) });
       toast('世界观已保存', 'success'); closeModal(); loadSettings();
     } catch(e) { toast('保存失败: ' + e.message, 'error'); }
   });
@@ -691,20 +1169,20 @@ window.confirmDeleteForeshadow = async function(id) {
 document.getElementById('new-foreshadow-btn').addEventListener('click', function() { openForeshadowModal(); });
 
 // 标签切换
-const tabs = ['chat', 'volumes', 'chapters', 'settings'];
+const tabs = ['chat', 'volumes', 'chapters', 'settings', 'graph'];
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === tab); b.classList.toggle('text-ink-600', b.dataset.tab !== tab); });
+  tabs.forEach(function(t) { const pane = document.getElementById('tab-'+t); if (pane) pane.classList.toggle('hidden', t !== tab); });
+  if (tab === 'volumes') loadVolumes();
+  if (tab === 'chapters' && !document.getElementById('chapters-list').dataset.loaded) { document.getElementById('chapters-list').dataset.loaded = '1'; loadChapters(); }
+  if (tab === 'settings') loadSettings();
+  if (tab === 'graph') loadGraph();
+  // 移动端关闭侧边栏
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
+}
 document.querySelectorAll('.tab-btn').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    const tab = btn.dataset.tab;
-    document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.toggle('active', b.dataset.tab === tab); b.classList.toggle('text-ink-600', b.dataset.tab !== tab); });
-    tabs.forEach(function(t) { const pane = document.getElementById('tab-'+t); if (pane) pane.classList.toggle('hidden', t !== tab); });
-    if (tab === 'volumes') loadVolumes();
-    if (tab === 'chapters' && !document.getElementById('chapters-list').dataset.loaded) { document.getElementById('chapters-list').dataset.loaded = '1'; loadChapters(); }
-    if (tab === 'settings') loadSettings();
-    if (tab === 'graph') loadGraph();
-    // 移动端关闭侧边栏
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sidebar-overlay').classList.remove('show');
-  });
+  btn.addEventListener('click', function() { switchTab(btn.dataset.tab); });
 });
 
 // 移动端侧边栏
@@ -716,6 +1194,7 @@ document.getElementById('sidebar-overlay').addEventListener('click', function() 
 let graphChart = null;
 let graphData = null;
 let relTypesCache = [];
+let _graphResizeHandler = null;
 const GRAPH_POS_KEY = 'moliu_graph_positions';
 
 function getSavedPositions() {
@@ -744,14 +1223,20 @@ async function loadGraph() {
 
 function renderGraph(data) {
   const canvas = document.getElementById('graph-canvas');
-  if (!canvas || !window.echarts) return;
-  if (graphChart) graphChart.dispose();
-  graphChart = echarts.init(canvas);
+  if (!canvas) return;
 
   if (data.nodes.length === 0) {
     canvas.innerHTML = '<div class="flex items-center justify-center h-full text-ink-400 text-sm"><div class="text-center"><div class="text-4xl mb-3">🕸️</div><p>暂无关系数据</p><p class="text-xs mt-1">点击右上角「+ 新建关系」开始</p></div></div>';
     return;
   }
+
+  if (!window.echarts) {
+    canvas.innerHTML = '<div class="flex items-center justify-center h-full text-ink-400 text-sm">图表库加载失败，请检查网络</div>';
+    return;
+  }
+
+  if (graphChart) graphChart.dispose();
+  graphChart = echarts.init(canvas);
 
   const categoryColors = { positive: '#6b8e4e', neutral: '#8a7960', negative: '#c8453c' };
   const roleColors = { main: '#c8453c', support: '#ff7d00', villain: '#722ed1', minor: '#86909c', neutral: '#16599e' };
@@ -760,11 +1245,12 @@ function renderGraph(data) {
 
   const nodes = data.nodes.map(function(n) {
     const size = 30 + Math.min(n.relation_count * 6, 30);
+    const rc = n.relation_count || 0;
+    const color = rc >= 9 ? '#c8453c' : (rc >= 4 ? '#16599e' : (rc >= 2 ? '#6b8e4e' : '#86909c'));
     const node = {
       id: n.id, name: n.name,
       symbolSize: size,
-      category: n.role_type || 'neutral',
-      itemStyle: { color: roleColors[n.role_type] || '#8a7960', borderColor: '#fff', borderWidth: 2 },
+      itemStyle: { color: color, borderColor: '#fff', borderWidth: 2 },
       label: { show: true, position: 'bottom', fontSize: 12, color: '#261d16' },
       rawData: n,
     };
@@ -787,8 +1273,6 @@ function renderGraph(data) {
     };
   });
 
-  const categories = Object.keys(roleColors).map(function(k) { return { name: { main: '主角', support: '配角', villain: '反派', minor: '路人', neutral: '中立' }[k] || k }; });
-
   // 有保存位置用 none 布局（固定），否则用 force 力导向
   const layout = hasSavedLayout ? 'none' : 'force';
   graphChart.setOption({
@@ -799,7 +1283,6 @@ function renderGraph(data) {
         return '';
       }
     },
-    legend: [{ data: categories.map(function(c) { return c.name; }), orient: 'vertical', right: 10, top: 20, textStyle: { fontSize: 11 } }],
     series: [{
       type: 'graph', layout: layout,
       data: nodes, links: edges,
@@ -1000,16 +1483,17 @@ document.getElementById('graph-search').addEventListener('input', function() {
   });
   if (matchedNames.size === 0) return;
   // 更新节点样式：匹配高亮，其他变淡
-  const roleColors = { main: '#c8453c', support: '#ff7d00', villain: '#722ed1', minor: '#86909c', neutral: '#16599e' };
   const savedPos = getSavedPositions();
   const nodes = graphData.nodes.map(function(n) {
     const size = 30 + Math.min(n.relation_count * 6, 30);
+    const rc = n.relation_count || 0;
+    const baseColor = rc >= 9 ? '#c8453c' : (rc >= 4 ? '#16599e' : (rc >= 2 ? '#6b8e4e' : '#86909c'));
     const isMatch = matchedNames.has(n.name);
     const node = {
       id: n.id, name: n.name,
       symbolSize: isMatch ? size * 1.4 : size,
       itemStyle: {
-        color: roleColors[n.role_type] || '#8a7960',
+        color: baseColor,
         borderColor: isMatch ? '#ff7d00' : '#fff',
         borderWidth: isMatch ? 4 : 2,
         opacity: isMatch ? 1 : 0.25,
@@ -1162,7 +1646,8 @@ async function runSmartGenerate() {
       body: JSON.stringify({
         model: 'moliu-chapter-generator',
         messages: [{ role: 'user', content: '生成第'+chNum+'章\n节拍：'+beat+'\n情绪：'+emotion }],
-        stream: true
+        stream: true,
+        novel_id: state.currentNovelId
       })
     });
     if (!res.ok) {
@@ -1194,10 +1679,9 @@ async function runSmartGenerate() {
     inputArea.classList.remove('hidden');
   }
 }
-document.getElementById('smart-gen-btn').addEventListener('click', function() { openGenerateModal(); });
 
 // 启动
-(async function init() { await checkStatus(); await loadModels(); })();
+(async function init() { await loadModels(); await loadNovels(); })();
 </script>
 </body>
 </html>

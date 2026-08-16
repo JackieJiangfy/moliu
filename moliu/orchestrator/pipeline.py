@@ -13,6 +13,7 @@ from moliu.engines.checker import AnchoredPreChecker, ConsistencyChecker
 from moliu.engines.gateway import DeepSeekGateway
 from moliu.engines.generator import Generator, count_words
 from moliu.engines.reader_eval import ReaderEvaluator
+from moliu.memory.layered import LayeredMemory
 from moliu.memory.retriever import Retriever
 from moliu.memory.store import MemoryStore
 from moliu.prompts.manager import PromptManager
@@ -73,6 +74,7 @@ class ChapterPipeline:
         prechecker: AnchoredPreChecker | None = None,
         reader: ReaderEvaluator | None = None,
         tracker: RhythmTracker | None = None,
+        layered_memory: LayeredMemory | None = None,
         novel_id: int = 1,
     ):
         self.config = config
@@ -85,6 +87,18 @@ class ChapterPipeline:
         self.prechecker = prechecker
         self.reader = reader
         self.tracker = tracker
+        # 分层记忆(P0-1):每章后更新,装配时注入
+        # 若未传入则按需懒加载
+        self._layered_memory = layered_memory
+
+    @property
+    def layered_memory(self) -> LayeredMemory:
+        """懒加载分层记忆(首次访问时初始化)"""
+        if self._layered_memory is None:
+            self._layered_memory = LayeredMemory(
+                self.config, novel_id=self.novel_id, gateway=self.gateway,
+            )
+        return self._layered_memory
 
     async def run_quality_checks(
         self,
@@ -166,8 +180,11 @@ class ChapterPipeline:
         quality_fn,
         max_retries: int = 1,
         retry_on: tuple[str, ...] = ("fatal",),
+        beat: str = "",
+        chapter_num: int | None = None,
+        use_targeted_fix: bool = True,
     ) -> tuple[ChapterResult, QualityReport]:
-        """生成 + 质检,不达标自动重试
+        """生成 + 质检,不达标自动重试(优先定向修复)
 
         Args:
             generate_fn: 无参 async callable,返回 ChapterResult
@@ -178,6 +195,9 @@ class ChapterPipeline:
                       - "reader" 读者明确不想继续
                       - "tension_low"  张力 < 4
                       - "repetitive"  读者感觉重复
+            beat: 本章节拍(定向修复时用于提醒 LLM 主线)
+            chapter_num: 章节号(定向修复日志用)
+            use_targeted_fix: 优先使用定向修复而非无脑重试(P1-2)
 
         Returns:
             (result, qr) 最终结果 + 质检报告(最后一次)
@@ -212,6 +232,49 @@ class ChapterPipeline:
                 "第 %d 次重试: %s",
                 attempt + 1, "; ".join(reasons),
             )
+
+            # P1-2: 优先尝试定向修复
+            if use_targeted_fix and self.gateway is not None:
+                try:
+                    from moliu.engines.targeted_fixer import TargetedFixer
+                    fixer = TargetedFixer(self.config, gateway=self.gateway)
+                    fix_result = await fixer.fix(
+                        original_content=result.content,
+                        quality_report=qr,
+                        chapter_num=chapter_num or result.chapter_num,
+                        beat=beat,
+                        max_iterations=1,
+                    )
+                    if fix_result.success and fix_result.final_content != result.content:
+                        from moliu.data.schemas import ChapterResult as _CR
+                        result = _CR(
+                            chapter_num=result.chapter_num,
+                            content=fix_result.final_content,
+                            word_count=len(fix_result.final_content),
+                        )
+                        qr = await quality_fn(result)
+                        log.info(
+                            "第 %d 章定向修复后重新质检 — fatal=%d, tension=%d",
+                            result.chapter_num, qr.consistency_fatal, qr.tension_score,
+                        )
+                        # 修复后再判一次是否还需要重试
+                        new_should_retry = False
+                        if "fatal" in retry_on and qr.consistency_fatal > 0:
+                            new_should_retry = True
+                        if "reader" in retry_on and not qr.reader_want_next:
+                            new_should_retry = True
+                        if "tension_low" in retry_on and qr.tension_score < 4:
+                            new_should_retry = True
+                        if "repetitive" in retry_on and qr.reader_repetitive:
+                            new_should_retry = True
+                        if not new_should_retry:
+                            break
+                        # 修复后仍不达标,继续下一轮(若有)
+                        continue
+                except Exception as e:
+                    log.warning("定向修复失败,降级到无脑重试: %s", e)
+
+            # 无脑重试(降级路径)
             result = await generate_fn()
             qr = await quality_fn(result)
 
@@ -250,3 +313,37 @@ class ChapterPipeline:
         (output_dir / "质量报告.md").write_text(qr.summary(), encoding="utf-8")
         if qr.consistency:
             (output_dir / "一致性检查.md").write_text(qr.consistency, encoding="utf-8")
+
+        # 分层记忆(P0-1):增量更新 Story Bible
+        try:
+            meta_path = output_dir / "meta.json"
+            if meta_path.exists():
+                from moliu.data.schemas import ChapterMeta
+                chapter_meta = ChapterMeta.from_json(meta_path)
+                self.layered_memory.update_bible_after_chapter(
+                    chapter_num, chapter_meta, result.content,
+                )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("Story Bible 更新失败: %s", e)
+
+    async def maybe_generate_arc_summary(self, chapter_num: int) -> None:
+        """章节生成后调用 — 检查并触发阶段摘要生成
+
+        每达到 ARC_SIZE 倍数时,异步生成上一阶段的摘要。
+        """
+        try:
+            from moliu.memory.layered import ARC_SIZE
+            if chapter_num <= 0 or chapter_num % ARC_SIZE != 0:
+                return
+            arc_id = chapter_num // ARC_SIZE
+            start = chapter_num - ARC_SIZE + 1
+            # 已存在则跳过
+            existing = self.layered_memory.load_arc_summaries()
+            if any(a.arc_id == arc_id for a in existing):
+                return
+            # 有 gateway 用 LLM,否则用启发式
+            await self.layered_memory.generate_arc_summary(arc_id, start, chapter_num)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("阶段摘要生成失败: %s", e)

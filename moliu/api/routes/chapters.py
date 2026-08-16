@@ -422,11 +422,29 @@ async def _run_generation(
         novel_id=novel_id,
     )
 
+    # P0-2: 若未传 beat 或 chapter_type=auto,从章级大纲读取
+    from moliu.engines.outline_engine import ChapterOutlineEngine
+    outline_engine = ChapterOutlineEngine(config, novel_id=novel_id, gateway=gateway)
+    if not beat or chapter_type == "auto":
+        plan = outline_engine.get_chapter_plan(chapter_num)
+        if plan is not None:
+            if not beat:
+                beat = plan.beat
+            if chapter_type == "auto":
+                chapter_type = plan.chapter_type
+            if not emotion or emotion == "轻松":
+                # 用户未指定情绪时用大纲规划
+                emotion = plan.emotion or "轻松"
+            # 标记大纲状态为 generating
+            outline_engine.mark_chapter_status(chapter_num, "generating")
+
     # 1. 锚点预检
     pre_ok, pre_text = await pipeline.run_pre_check(beat, characters, chapter_num=chapter_num)
 
-    # 2. 上下文组装
-    assembler = StructuredAssembler(config, novel_id=novel_id)
+    # 2. 上下文组装(注入分层记忆 P0-1)
+    from moliu.memory.layered import LayeredMemory
+    layered = LayeredMemory(config, novel_id=novel_id, gateway=gateway)
+    assembler = StructuredAssembler(config, novel_id=novel_id, layered_memory=layered)
     ctx = await assembler.assemble(
         chapter_num, beat, characters, world,
         narrator=narrator, narrator_guide="",
@@ -447,6 +465,7 @@ async def _run_generation(
             temperature=temperature,
             segmented=segmented,
             chapter_type=chapter_type,
+            memory_context=ctx.layered_memory,
         )
 
         # 去AI味
@@ -488,6 +507,9 @@ async def _run_generation(
         quality_fn=_quality,
         max_retries=getattr(config, "quality_retry_max", 1),
         retry_on=retry_conditions,
+        beat=beat,
+        chapter_num=chapter_num,
+        use_targeted_fix=True,
     )
 
     # 6. 落盘 + 记忆 + 节奏
@@ -497,6 +519,27 @@ async def _run_generation(
     pipeline.save_meta(chapter_num, result, qr, clean_summary, emotion, characters)
     pipeline.save_to_memory(chapter_num, result, clean_summary, emotion, characters)
     pipeline.save_rhythm_record(chapter_num, result, qr, chapter_type, emotion)
+    # 分层记忆(P0-1):每 10 章触发一次阶段摘要生成
+    await pipeline.maybe_generate_arc_summary(chapter_num)
+
+    # P1-1:自动提取并应用伏笔
+    try:
+        from moliu.engines.foreshadow_extractor import extract_and_apply_foreshadows
+        plan = outline_engine.get_chapter_plan(chapter_num)
+        fs_result, fs_stats = await extract_and_apply_foreshadows(
+            config, novel_id, chapter_num, result.content,
+            plan=plan, gateway=gateway,
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("伏笔自动提取失败: %s", e)
+
+    # P0-2:标记大纲状态为 completed
+    try:
+        outline_engine.mark_chapter_status(chapter_num, "completed")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("大纲状态更新失败: %s", e)
 
     filepath = config.resolve_output_dir(novel_id) / Config.chapter_dir_name(chapter_num) / "正文.md"
 

@@ -152,6 +152,7 @@ class Generator:
         segmented: bool = True,
         chapter_type: str = "normal",
         resume_from: str | None = None,  # 用于分段重试
+        memory_context: str = "",  # 分层记忆(P0-1)
     ) -> ChapterResult:
         """
         生成一章正文
@@ -170,6 +171,7 @@ class Generator:
             segmented: 是否使用分段生成（三幕结构：opening/middle/ending）
             chapter_type: 章节类型 (normal/opening/climax/transition/epilogue)
             resume_from: 分段重试时从哪里继续 ("middle" 或 "ending")
+            memory_context: 分层记忆上下文(中期阶段摘要 + 长期 Story Bible)
         """
         # 自动回灌前文
         if auto_recent and not recent_chapters:
@@ -191,6 +193,7 @@ class Generator:
                 temperature=temperature,
                 chapter_type=chapter_type,
                 resume_from=resume_from,
+                memory_context=memory_context,
             )
         else:
             return await self._generate_chapter_single(
@@ -204,6 +207,7 @@ class Generator:
                 narrator_card=narrator_card,
                 temperature=temperature,
                 chapter_type=chapter_type,
+                memory_context=memory_context,
             )
 
     def _resolve_chapter_type(self, chapter_num: int, chapter_type: str) -> str:
@@ -362,6 +366,7 @@ class Generator:
         narrator_card: NarratorCard | None = None,
         temperature: float | None = None,
         chapter_type: str = "normal",
+        memory_context: str = "",
     ) -> ChapterResult:
         """
         单次调用生成一章（原始模式）
@@ -385,6 +390,12 @@ class Generator:
         # 根据章节类型获取写作指导
         chapter_guidance = self._get_chapter_guidance(chapter_type)
 
+        # 分层记忆(P0-1):拼接到 chapter_guidance 之前,作为前文记忆
+        full_guidance = ""
+        if memory_context:
+            full_guidance += memory_context + "\n\n"
+        full_guidance += chapter_guidance
+
         # 渲染 System Prompt
         system_prompt = self.prompts.render(
             "chapter_generate.system.j2",
@@ -395,7 +406,7 @@ class Generator:
             banned_phrases=banned_phrases,
             min_words=self.config.chapter_min_words,
             max_words=self.config.chapter_max_words,
-            chapter_guidance=chapter_guidance,
+            chapter_guidance=full_guidance,
         )
 
         # 渲染 User Prompt
@@ -438,10 +449,11 @@ class Generator:
         temperature: float | None = None,
         chapter_type: str = "normal",
         resume_from: str | None = None,  # "middle" 或 "ending"，用于重试
+        memory_context: str = "",
     ) -> ChapterResult:
         """
         分段生成一章（三幕结构：opening/middle/ending）
-        
+
         支持中间结果落盘和重试：
         - 每段生成完成后自动保存到临时文件
         - 如果某段失败，下次可以从失败位置继续
@@ -454,6 +466,9 @@ class Generator:
         # 准备叙述者相关变量
         # 获取章节类型写作指导
         chapter_guidance = self._get_chapter_guidance(chapter_type)
+        # 分层记忆(P0-1):拼接到 chapter_guidance 之前
+        if memory_context:
+            chapter_guidance = memory_context + "\n\n" + chapter_guidance
         narrator_context = ""
         banned_phrases: list[str] = []
 

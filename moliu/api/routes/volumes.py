@@ -1,4 +1,4 @@
-"""卷管理 API — 通用 CRUD"""
+"""卷管理 API — 通用 CRUD + 章级大纲(P0-2)"""
 
 from __future__ import annotations
 
@@ -9,7 +9,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from moliu.api.locks import novel_lock
-from moliu.data.schemas import VolumeIndex, VolumePlan
+from moliu.data.schemas import ChapterPlan, VolumeIndex, VolumePlan
+from moliu.engines.outline_engine import ChapterOutlineEngine
 
 router = APIRouter()
 
@@ -193,3 +194,141 @@ async def delete_volume(
                 _save_index(request, index, novel_id)
                 return
         raise HTTPException(status_code=404, detail=f"卷 {volume_id} 不存在")
+
+
+# === 章级大纲 (P0-2) ===
+
+class ChapterPlanResponse(BaseModel):
+    chapter_num: int
+    title: str = ""
+    beat: str = ""
+    emotion: str = ""
+    chapter_type: str = "normal"
+    characters: list[str] = []
+    key_events: list[str] = []
+    foreshadows_plant: list[str] = []
+    foreshadows_pay: list[str] = []
+    status: str = "planned"
+
+
+class ChapterPlanUpdate(BaseModel):
+    title: str | None = None
+    beat: str | None = None
+    emotion: str | None = None
+    chapter_type: str | None = None
+    characters: list[str] | None = None
+    key_events: list[str] | None = None
+    foreshadows_plant: list[str] | None = None
+    foreshadows_pay: list[str] | None = None
+    status: str | None = None
+
+
+class OutlineGenerateRequest(BaseModel):
+    force: bool = False  # 是否强制覆盖已存在的大纲
+
+
+class OutlineGenerateResponse(BaseModel):
+    volume_id: int
+    chapter_start: int
+    chapter_end: int
+    plans_count: int
+    model_used: str
+    tokens_used: int
+
+
+def _get_outline_engine(request: Request, novel_id: int = 1) -> ChapterOutlineEngine:
+    """构造大纲引擎(无 gateway,仅启发式)"""
+    cfg = request.app.state.config
+    gateway = getattr(request.app.state, "gateway", None)
+    return ChapterOutlineEngine(cfg, novel_id=novel_id, gateway=gateway)
+
+
+@router.get("/volumes/{volume_id}/outline", response_model=list[ChapterPlanResponse])
+async def get_volume_outline(
+    request: Request,
+    volume_id: int,
+    novel_id: int = Query(1, description="小说ID"),
+):
+    """获取卷的章级大纲"""
+    engine = _get_outline_engine(request, novel_id)
+    plans = engine.load_volume_outline(volume_id)
+    return [ChapterPlanResponse(**p.model_dump()) for p in plans]
+
+
+@router.post(
+    "/volumes/{volume_id}/outline/generate",
+    response_model=OutlineGenerateResponse,
+    status_code=201,
+)
+async def generate_volume_outline(
+    request: Request,
+    volume_id: int,
+    body: OutlineGenerateRequest,
+    novel_id: int = Query(1, description="小说ID"),
+):
+    """为卷生成章级大纲
+
+    - 若 gateway 可用,使用 LLM 生成
+    - 否则降级为启发式(节奏模板填充)
+    - force=False 时若已存在大纲则直接返回缓存
+    """
+    engine = _get_outline_engine(request, novel_id)
+    try:
+        result = await engine.generate_for_volume(volume_id, force=body.force)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return OutlineGenerateResponse(
+        volume_id=result.volume_id,
+        chapter_start=result.chapter_start,
+        chapter_end=result.chapter_end,
+        plans_count=len(result.plans),
+        model_used=result.model_used,
+        tokens_used=result.tokens_used,
+    )
+
+
+@router.put("/volumes/{volume_id}/outline/{chapter_num}", response_model=ChapterPlanResponse)
+async def update_chapter_outline(
+    request: Request,
+    volume_id: int,
+    chapter_num: int,
+    body: ChapterPlanUpdate,
+    novel_id: int = Query(1, description="小说ID"),
+):
+    """更新单章大纲字段"""
+    engine = _get_outline_engine(request, novel_id)
+    fields = body.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="未提供任何更新字段")
+    updated = engine.update_chapter_plan(chapter_num, **fields)
+    if updated is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"章节 {chapter_num} 在卷 {volume_id} 的大纲中不存在",
+        )
+    return ChapterPlanResponse(**updated.model_dump())
+
+
+@router.get("/outline/{chapter_num}", response_model=ChapterPlanResponse)
+async def get_chapter_plan(
+    request: Request,
+    chapter_num: int,
+    novel_id: int = Query(1, description="小说ID"),
+):
+    """跨卷查找指定章节的大纲规划"""
+    engine = _get_outline_engine(request, novel_id)
+    plan = engine.get_chapter_plan(chapter_num)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"章节 {chapter_num} 无大纲规划")
+    return ChapterPlanResponse(**plan.model_dump())
+
+
+@router.get("/outline", response_model=dict)
+async def get_outline_coverage(
+    request: Request,
+    novel_id: int = Query(1, description="小说ID"),
+):
+    """获取大纲覆盖率统计"""
+    engine = _get_outline_engine(request, novel_id)
+    return engine.get_outline_coverage()

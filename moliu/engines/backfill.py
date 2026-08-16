@@ -96,7 +96,7 @@ class MetadataBackfiller:
         result = {}
 
         async with DeepSeekGateway(self.config) as gateway:
-            if "title" in fields and not meta.title:
+            if "title" in fields and (not meta.title or meta.title == f"第{chapter_num}章"):
                 title = await self._generate_title(gateway, content)
                 meta.title = title
                 result["title"] = title

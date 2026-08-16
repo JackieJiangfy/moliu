@@ -302,10 +302,12 @@ async def get_graph(
         rel_count[rel["source_name"]] = rel_count.get(rel["source_name"], 0) + 1
         rel_count[rel["target_name"]] = rel_count.get(rel["target_name"], 0) + 1
 
-    # 构建节点（关系中出现过的角色，按首次出现顺序保序，再按关联数降序排）
-    node_names = list(dict.fromkeys(
-        [rel["source_name"] for rel in relationships] + [rel["target_name"] for rel in relationships]
-    ))
+    # 构建节点：所有角色（含尚未建立关系的角色），再按关联数降序排
+    node_names = list(chars_map.keys())
+    for rel in relationships:
+        for name in (rel["source_name"], rel["target_name"]):
+            if name not in node_names:
+                node_names.append(name)
     node_names.sort(key=lambda n: rel_count.get(n, 0), reverse=True)
 
     nodes = []
